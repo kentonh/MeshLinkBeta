@@ -2,13 +2,20 @@
 Federated Uploader Plugin for MeshLinkBeta
 
 This plugin integrates the federated collector system into MeshLinkBeta.
-It captures packets and queues them for upload to the central API.
+It provides two upload strategies:
+
+1. Real-time packet capture: Captures packets as they arrive
+2. Periodic database export: Exports nodes.db data at regular intervals
 
 Configuration (config.yml):
     federated_uploader:
         enabled: true
-        collector_id: "collector-01"
-        db_path: "./federated_outbox.sqlite"
+        collector_id: "meshlink-collector-01"
+        api_url: "https://meshcollector.fly.dev"
+        token: "your-secure-token-here"
+
+        # Real-time packet capture
+        outbox_db_path: "./federated_outbox.sqlite"
         enqueue_packet_types:
             - TEXT_MESSAGE_APP
             - POSITION_APP
@@ -16,13 +23,25 @@ Configuration (config.yml):
             - TELEMETRY_APP
             - TRACEROUTE_APP
             - ROUTING_APP
+
+        # Periodic database export
+        export_enabled: true
+        export_interval_minutes: 60
+        nodes_db_path: "./nodes.db"
+        export_hours_lookback: 2
 """
 
 import logging
 import time
 import sys
 import os
-from typing import Dict, Any, Optional
+import threading
+import sqlite3
+import requests
+import gzip
+import json
+from typing import Dict, Any, Optional, List
+from datetime import datetime, timedelta
 
 # Add federated-meshtastic collector to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../federated-meshtastic/collector'))
@@ -33,10 +52,8 @@ except ImportError:
     logging.error("Failed to import OutboxManager. Make sure federated-meshtastic/collector is available.")
     OutboxManager = None
 
-from plugins.base import Base
-
-
-logger = logging.getLogger(__name__)
+from plugins import Base
+import plugins.liblogger as logger
 
 
 class Plugin(Base):
@@ -52,16 +69,23 @@ class Plugin(Base):
             logger.error("OutboxManager not available. Plugin will not function.")
             return
 
-        # Load config
-        config = self.config.get('federated_uploader', {})
+        # Load config from cfg module
+        import cfg
+        config = cfg.config.get('federated_uploader', {})
+
         self.enabled = config.get('enabled', False)
 
         if not self.enabled:
             logger.info("Federated uploader plugin is disabled")
             return
 
+        # Core configuration
         self.collector_id = config.get('collector_id', 'meshlink-collector')
-        self.db_path = config.get('db_path', './federated_outbox.sqlite')
+        self.api_url = config.get('api_url', 'https://meshcollector.fly.dev').rstrip('/')
+        self.token = config.get('token', '')
+
+        # Real-time packet capture configuration
+        self.outbox_db_path = config.get('outbox_db_path', './federated_outbox.sqlite')
         self.enqueue_types = set(config.get('enqueue_packet_types', [
             'TEXT_MESSAGE_APP',
             'POSITION_APP',
@@ -71,9 +95,15 @@ class Plugin(Base):
             'ROUTING_APP',
         ]))
 
-        # Initialize outbox manager
+        # Periodic export configuration
+        self.export_enabled = config.get('export_enabled', True)
+        self.export_interval = config.get('export_interval_minutes', 60) * 60  # Convert to seconds
+        self.nodes_db_path = config.get('nodes_db_path', './nodes.db')
+        self.export_lookback_hours = config.get('export_hours_lookback', 2)
+
+        # Initialize outbox manager for real-time packets
         try:
-            self.outbox = OutboxManager(self.db_path, self.collector_id)
+            self.outbox = OutboxManager(self.outbox_db_path, self.collector_id)
             logger.info(f"Federated uploader initialized: collector_id='{self.collector_id}'")
 
             # Log initial stats
@@ -83,10 +113,42 @@ class Plugin(Base):
         except Exception as e:
             logger.error(f"Failed to initialize OutboxManager: {e}", exc_info=True)
             self.enabled = False
+            return
+
+        # Export thread control
+        self.export_thread = None
+        self.export_stop_event = threading.Event()
+        self.last_export_time = None
+
+    def start(self):
+        """Start the plugin and begin periodic exports if enabled."""
+        if not self.enabled:
+            return
+
+        logger.info("Starting federated uploader plugin")
+
+        # Validate token
+        if not self.token:
+            logger.warn("No API token configured! Uploads will fail. Set 'token' in config.yml")
+
+        # Validate API URL
+        if not self.api_url:
+            logger.error("No API URL configured! Set 'api_url' in config.yml")
+            return
+
+        # Start periodic export thread
+        if self.export_enabled:
+            if not os.path.exists(self.nodes_db_path):
+                logger.warn(f"nodes.db not found at {self.nodes_db_path}. Periodic export disabled.")
+                self.export_enabled = False
+            else:
+                logger.info(f"Starting periodic export thread (every {self.export_interval/60:.0f} minutes)")
+                self.export_thread = threading.Thread(target=self._export_loop, daemon=True)
+                self.export_thread.start()
 
     def onReceive(self, packet: Dict[str, Any], interface, client):
         """
-        Called when a packet is received.
+        Called when a packet is received (real-time capture).
 
         Args:
             packet: The received packet
@@ -121,9 +183,239 @@ class Plugin(Base):
         except Exception as e:
             logger.error(f"Error processing packet for federated upload: {e}", exc_info=True)
 
+    def _export_loop(self):
+        """Background thread that periodically exports nodes.db data."""
+        logger.info("Export loop started")
+
+        # Run first export after a short delay to let MeshLinkBeta settle
+        time.sleep(30)
+
+        while not self.export_stop_event.is_set():
+            try:
+                self._run_export()
+            except Exception as e:
+                logger.error(f"Error during periodic export: {e}", exc_info=True)
+
+            # Sleep until next export
+            self.export_stop_event.wait(self.export_interval)
+
+        logger.info("Export loop stopped")
+
+    def _run_export(self):
+        """Run a single export of nodes.db data to the API."""
+        logger.info("Starting periodic export from nodes.db")
+        start_time = time.time()
+
+        try:
+            # Connect to nodes.db
+            conn = sqlite3.connect(self.nodes_db_path)
+            conn.row_factory = sqlite3.Row
+
+            # Calculate cutoff time
+            cutoff = (datetime.utcnow() - timedelta(hours=self.export_lookback_hours)).isoformat() + "Z"
+
+            # Export data
+            nodes = self._export_nodes(conn, cutoff)
+            packets = self._export_packets(conn, cutoff)
+            topology = self._export_topology(conn, cutoff)
+            traceroutes = self._export_traceroutes(conn, cutoff)
+
+            conn.close()
+
+            # Upload if we have any data
+            if any([nodes, packets, topology, traceroutes]):
+                data = {
+                    'nodes': nodes,
+                    'packets': packets,
+                    'topology': topology,
+                    'traceroutes': traceroutes
+                }
+
+                result = self._upload_batch(data)
+
+                elapsed = time.time() - start_time
+                logger.infogreen(f"Export completed in {elapsed:.1f}s: {result['summary']}")
+                self.last_export_time = datetime.utcnow()
+            else:
+                logger.info(f"No new data to export (lookback: {self.export_lookback_hours}h)")
+
+        except Exception as e:
+            logger.error(f"Export failed: {e}", exc_info=True)
+
+    def _export_nodes(self, conn: sqlite3.Connection, since: str) -> List[Dict[str, Any]]:
+        """Export nodes from nodes table."""
+        query = "SELECT * FROM nodes WHERE updated_at > ? ORDER BY last_seen_utc DESC"
+        rows = conn.execute(query, (since,)).fetchall()
+
+        nodes = []
+        for row in rows:
+            node = {
+                'node_id': row['node_id'],
+                'node_num': row['node_num'],
+                'short_name': row['short_name'],
+                'long_name': row['long_name'],
+                'latitude': row['latitude'],
+                'longitude': row['longitude'],
+                'altitude': row['altitude'],
+                'last_seen_utc': row['last_seen_utc'],
+                'first_seen_utc': row['first_seen_utc'],
+                'total_packets_received': row['total_packets_received'],
+                'hardware_model': row['hardware_model'],
+                'firmware_version': row['firmware_version'],
+                'is_mqtt': bool(row['is_mqtt']) if row['is_mqtt'] is not None else None,
+                'battery_level': row['battery_level'],
+                'voltage': row['voltage'],
+                'is_charging': bool(row['is_charging']) if row['is_charging'] is not None else None,
+                'is_powered': bool(row['is_powered']) if row['is_powered'] is not None else None,
+                'last_battery_update_utc': row['last_battery_update_utc']
+            }
+            # Remove None values
+            nodes.append({k: v for k, v in node.items() if v is not None})
+
+        logger.debug(f"Exported {len(nodes)} nodes")
+        return nodes
+
+    def _export_packets(self, conn: sqlite3.Connection, since: str) -> List[Dict[str, Any]]:
+        """Export packets from packet_history table (limited)."""
+        query = """
+            SELECT * FROM packet_history
+            WHERE received_at_utc > ?
+            ORDER BY received_at_utc DESC
+            LIMIT 5000
+        """
+        rows = conn.execute(query, (since,)).fetchall()
+
+        packets = []
+        for row in rows:
+            packet = {
+                'node_id': row['node_id'],
+                'received_at_utc': row['received_at_utc'],
+                'packet_type': row['packet_type'],
+                'channel_index': row['channel_index'],
+                'hop_start': row['hop_start'],
+                'hop_limit': row['hop_limit'],
+                'hops_away': row['hops_away'],
+                'via_mqtt': bool(row['via_mqtt']) if row['via_mqtt'] is not None else None,
+                'relay_node_id': row['relay_node_id'],
+                'relay_node_name': row['relay_node_name'],
+                'rx_snr': row['rx_snr'],
+                'rx_rssi': row['rx_rssi'],
+                'latitude': row['latitude'],
+                'longitude': row['longitude'],
+                'altitude': row['altitude'],
+                'battery_level': row['battery_level'],
+                'voltage': row['voltage'],
+                'is_charging': bool(row['is_charging']) if row['is_charging'] is not None else None,
+                'temperature': row['temperature'],
+                'humidity': row['humidity'],
+                'pressure': row['pressure']
+            }
+            # Remove None values and sensitive fields
+            packets.append({k: v for k, v in packet.items() if v is not None})
+
+        logger.debug(f"Exported {len(packets)} packets")
+        return packets
+
+    def _export_topology(self, conn: sqlite3.Connection, since: str) -> List[Dict[str, Any]]:
+        """Export topology links from network_topology table."""
+        query = """
+            SELECT * FROM network_topology
+            WHERE last_heard_utc > ? AND is_active = 1
+            ORDER BY last_heard_utc DESC
+        """
+        rows = conn.execute(query, (since,)).fetchall()
+
+        links = []
+        for row in rows:
+            link = {
+                'source_node_id': row['source_node_id'],
+                'neighbor_node_id': row['neighbor_node_id'],
+                'first_heard_utc': row['first_heard_utc'],
+                'last_heard_utc': row['last_heard_utc'],
+                'total_packets': row['total_packets'],
+                'avg_snr': row['avg_snr'],
+                'avg_rssi': row['avg_rssi'],
+                'min_snr': row['min_snr'],
+                'max_snr': row['max_snr'],
+                'min_rssi': row['min_rssi'],
+                'max_rssi': row['max_rssi'],
+                'link_quality_score': row['link_quality_score'],
+                'is_active': bool(row['is_active']) if row['is_active'] is not None else None,
+                'last_hop_count': row['last_hop_count']
+            }
+            # Remove None values
+            links.append({k: v for k, v in link.items() if v is not None})
+
+        logger.debug(f"Exported {len(links)} topology links")
+        return links
+
+    def _export_traceroutes(self, conn: sqlite3.Connection, since: str) -> List[Dict[str, Any]]:
+        """Export traceroutes from traceroutes table."""
+        query = """
+            SELECT * FROM traceroutes
+            WHERE received_at_utc > ?
+            ORDER BY received_at_utc DESC
+            LIMIT 1000
+        """
+        rows = conn.execute(query, (since,)).fetchall()
+
+        traceroutes = []
+        for row in rows:
+            trace = {
+                'from_node_id': row['from_node_id'],
+                'to_node_id': row['to_node_id'],
+                'route_json': row['route_json'],
+                'hop_count': row['hop_count'],
+                'received_at_utc': row['received_at_utc'],
+                'snr_data': row['snr_data'],
+                'packet_id': row['packet_id']
+            }
+            # Remove None values
+            traceroutes.append({k: v for k, v in trace.items() if v is not None})
+
+        logger.debug(f"Exported {len(traceroutes)} traceroutes")
+        return traceroutes
+
+    def _upload_batch(self, data: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
+        """Upload batch data to MeshMonitor API."""
+        # Build payload
+        payload = {
+            "collector_id": self.collector_id,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "schema_version": 1,
+            "data": data
+        }
+
+        # Send as JSON (MeshMonitor handles it directly)
+        json_bytes = json.dumps(payload).encode('utf-8')
+
+        total_items = sum(len(items) for items in data.values())
+        logger.debug(f"Uploading {total_items} items to MeshMonitor (size: {len(json_bytes):,} bytes)")
+
+        # Upload to MeshMonitor endpoint
+        try:
+            response = requests.post(
+                f"{self.api_url}/api/ingest/meshlink",
+                json=payload,
+                headers={
+                    "Content-Type": "application/json"
+                },
+                timeout=60
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                return result
+            else:
+                logger.error(f"Upload failed: {response.status_code} - {response.text}")
+                response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Upload error: {e}")
+            raise
+
     def _build_event_data(self, packet: Dict[str, Any], interface) -> Dict[str, Any]:
         """
-        Build event data from MeshLinkBeta packet format.
+        Build event data from MeshLinkBeta packet format for real-time capture.
 
         Args:
             packet: Raw packet from Meshtastic
@@ -153,9 +445,8 @@ class Plugin(Base):
         if 'viaMqtt' in packet and packet['viaMqtt']:
             event_data['via_mqtt'] = True
 
-        # Relay node (MeshLinkBeta may have already resolved this)
+        # Relay node
         if 'relayNode' in packet and packet['relayNode']:
-            # Could be partial ID or full ID
             relay = packet['relayNode']
             if isinstance(relay, int):
                 event_data['relay_node'] = f"!{relay:08x}"
@@ -218,29 +509,6 @@ class Plugin(Base):
                 # Store traceroute as separate event
                 self._enqueue_traceroute(packet, decoded, interface)
 
-        # Try to get node info from interface cache
-        from_id = packet.get('fromId') or packet.get('from')
-        if from_id and hasattr(interface, 'nodes'):
-            node_info = interface.nodes.get(from_id)
-            if node_info:
-                event_data['from_node_info'] = event_data.get('from_node_info', {})
-                if hasattr(node_info, 'user'):
-                    user = node_info.user
-                    event_data['from_node_info'].update({
-                        'short_name': getattr(user, 'shortName', None),
-                        'long_name': getattr(user, 'longName', None),
-                        'hardware': getattr(user, 'hwModel', None),
-                        'role': getattr(user, 'role', None),
-                    })
-                if hasattr(node_info, 'position'):
-                    pos = node_info.position
-                    if hasattr(pos, 'latitude') and pos.latitude:
-                        event_data['from_node_info']['latitude'] = pos.latitude
-                    if hasattr(pos, 'longitude') and pos.longitude:
-                        event_data['from_node_info']['longitude'] = pos.longitude
-                    if hasattr(pos, 'altitude') and pos.altitude:
-                        event_data['from_node_info']['altitude'] = pos.altitude
-
         return event_data
 
     def _enqueue_traceroute(self, packet: Dict[str, Any], decoded: Dict[str, Any], interface):
@@ -282,7 +550,7 @@ class Plugin(Base):
 
     def get_stats(self) -> Optional[Dict[str, Any]]:
         """
-        Get outbox statistics.
+        Get combined statistics.
 
         Returns:
             Dictionary with stats or None if disabled
@@ -291,14 +559,23 @@ class Plugin(Base):
             return None
 
         try:
-            return self.outbox.get_stats()
+            stats = {
+                'outbox': self.outbox.get_stats(),
+                'export': {
+                    'enabled': self.export_enabled,
+                    'interval_minutes': self.export_interval / 60,
+                    'last_export': self.last_export_time.isoformat() if self.last_export_time else None,
+                    'lookback_hours': self.export_lookback_hours
+                }
+            }
+            return stats
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
             return None
 
     def cleanup(self, days: int = 7) -> int:
         """
-        Clean up old sent events.
+        Clean up old sent events from outbox.
 
         Args:
             days: Remove events older than this many days
@@ -316,3 +593,10 @@ class Plugin(Base):
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
             return 0
+
+    def __del__(self):
+        """Cleanup when plugin is destroyed."""
+        if hasattr(self, 'export_stop_event'):
+            self.export_stop_event.set()
+        if hasattr(self, 'export_thread') and self.export_thread:
+            self.export_thread.join(timeout=5)

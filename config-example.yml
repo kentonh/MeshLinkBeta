@@ -75,3 +75,30 @@ node_tracking:
     enabled: false                        # Enable battery alerts
     low_battery_threshold: 20            # Alert when battery drops below this percentage
     critical_battery_threshold: 10       # Critical battery alert threshold
+
+### FEDERATED UPLOADER PLUGIN
+# Uploads packet data and node database to MeshMonitor for centralized tracking
+# Provides two upload strategies:
+#   1. Real-time packet capture: Queues packets to outbox, uploaded by separate uploader service
+#   2. Periodic database export: Background thread exports nodes.db data directly to MeshMonitor
+federated_uploader:
+  enabled: false                         # Set to true to enable uploading to MeshMonitor
+  collector_id: "meshlink-collector-01"  # Unique identifier for this collector
+  api_url: "http://localhost:5000"       # MeshMonitor API URL (update to your server's address)
+  token: ""                              # Not used for MeshMonitor (kept for compatibility)
+
+  # Real-time packet capture (queued to outbox, uploaded by separate uploader service)
+  outbox_db_path: "./federated_outbox.sqlite"  # Path to outbox database
+  enqueue_packet_types:                  # Packet types to upload to central API
+    - TEXT_MESSAGE_APP                   # Text messages (content NOT uploaded, only metadata)
+    - POSITION_APP                       # GPS positions
+    - NODEINFO_APP                       # Node information
+    - TELEMETRY_APP                      # Battery, temperature, sensor data
+    - TRACEROUTE_APP                     # Route discovery
+    - ROUTING_APP                        # Routing information
+
+  # Periodic database export (runs in background thread within MeshLinkBeta)
+  export_enabled: true                   # Enable periodic export of nodes.db data
+  export_interval_minutes: 60           # How often to export (in minutes)
+  nodes_db_path: "./nodes.db"           # Path to nodes database
+  export_hours_lookback: 2              # How many hours of data to export each time (overlapping to prevent gaps)
