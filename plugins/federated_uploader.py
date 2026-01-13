@@ -66,7 +66,7 @@ class Plugin(Base):
         super().__init__()
 
         if OutboxManager is None:
-            logger.error("OutboxManager not available. Plugin will not function.")
+            logger.warn("OutboxManager not available. Plugin will not function.")
             return
 
         # Load config from cfg module
@@ -111,7 +111,7 @@ class Plugin(Base):
             logger.info(f"Outbox stats: {stats}")
 
         except Exception as e:
-            logger.error(f"Failed to initialize OutboxManager: {e}", exc_info=True)
+            logger.warn(f"Failed to initialize OutboxManager: {e}")
             self.enabled = False
             return
 
@@ -133,7 +133,7 @@ class Plugin(Base):
 
         # Validate API URL
         if not self.api_url:
-            logger.error("No API URL configured! Set 'api_url' in config.yml")
+            logger.warn("No API URL configured! Set 'api_url' in config.yml")
             return
 
         # Start periodic export thread
@@ -166,7 +166,7 @@ class Plugin(Base):
 
             # Check if we should enqueue this packet type
             if packet_type and packet_type not in self.enqueue_types:
-                logger.debug(f"Skipping packet type {packet_type}")
+                logger.info(f"Skipping packet type {packet_type}")
                 return
 
             # Build event data
@@ -176,12 +176,12 @@ class Plugin(Base):
             event_id = self.outbox.enqueue('packet', event_data)
 
             if event_id:
-                logger.debug(f"Enqueued packet {packet.get('id')} from {event_data['from_node']}")
+                logger.info(f"Enqueued packet {packet.get('id')} from {event_data['from_node']}")
             else:
-                logger.debug(f"Duplicate packet {packet.get('id')}")
+                logger.info(f"Duplicate packet {packet.get('id')}")
 
         except Exception as e:
-            logger.error(f"Error processing packet for federated upload: {e}", exc_info=True)
+            logger.warn(f"Error processing packet for federated upload: {e}")
 
     def _export_loop(self):
         """Background thread that periodically exports nodes.db data."""
@@ -194,7 +194,7 @@ class Plugin(Base):
             try:
                 self._run_export()
             except Exception as e:
-                logger.error(f"Error during periodic export: {e}", exc_info=True)
+                logger.warn(f"Error during periodic export: {e}")
 
             # Sleep until next export
             self.export_stop_event.wait(self.export_interval)
@@ -240,7 +240,7 @@ class Plugin(Base):
                 logger.info(f"No new data to export (lookback: {self.export_lookback_hours}h)")
 
         except Exception as e:
-            logger.error(f"Export failed: {e}", exc_info=True)
+            logger.warn(f"Export failed: {e}")
 
     def _export_nodes(self, conn: sqlite3.Connection, since: str) -> List[Dict[str, Any]]:
         """Export nodes from nodes table."""
@@ -272,7 +272,7 @@ class Plugin(Base):
             # Remove None values
             nodes.append({k: v for k, v in node.items() if v is not None})
 
-        logger.debug(f"Exported {len(nodes)} nodes")
+        logger.info(f"Exported {len(nodes)} nodes")
         return nodes
 
     def _export_packets(self, conn: sqlite3.Connection, since: str) -> List[Dict[str, Any]]:
@@ -313,7 +313,7 @@ class Plugin(Base):
             # Remove None values and sensitive fields
             packets.append({k: v for k, v in packet.items() if v is not None})
 
-        logger.debug(f"Exported {len(packets)} packets")
+        logger.info(f"Exported {len(packets)} packets")
         return packets
 
     def _export_topology(self, conn: sqlite3.Connection, since: str) -> List[Dict[str, Any]]:
@@ -346,7 +346,7 @@ class Plugin(Base):
             # Remove None values
             links.append({k: v for k, v in link.items() if v is not None})
 
-        logger.debug(f"Exported {len(links)} topology links")
+        logger.info(f"Exported {len(links)} topology links")
         return links
 
     def _export_traceroutes(self, conn: sqlite3.Connection, since: str) -> List[Dict[str, Any]]:
@@ -373,7 +373,7 @@ class Plugin(Base):
             # Remove None values
             traceroutes.append({k: v for k, v in trace.items() if v is not None})
 
-        logger.debug(f"Exported {len(traceroutes)} traceroutes")
+        logger.info(f"Exported {len(traceroutes)} traceroutes")
         return traceroutes
 
     def _upload_batch(self, data: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
@@ -390,7 +390,7 @@ class Plugin(Base):
         json_bytes = json.dumps(payload).encode('utf-8')
 
         total_items = sum(len(items) for items in data.values())
-        logger.debug(f"Uploading {total_items} items to MeshMonitor (size: {len(json_bytes):,} bytes)")
+        logger.info(f"Uploading {total_items} items to MeshMonitor (size: {len(json_bytes):,} bytes)")
 
         # Upload to MeshMonitor endpoint
         try:
@@ -407,10 +407,10 @@ class Plugin(Base):
                 result = response.json()
                 return result
             else:
-                logger.error(f"Upload failed: {response.status_code} - {response.text}")
+                logger.warn(f"Upload failed: {response.status_code} - {response.text}")
                 response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            logger.error(f"Upload error: {e}")
+            logger.warn(f"Upload error: {e}")
             raise
 
     def _build_event_data(self, packet: Dict[str, Any], interface) -> Dict[str, Any]:
@@ -543,10 +543,10 @@ class Plugin(Base):
 
             event_id = self.outbox.enqueue('trace_event', trace_data)
             if event_id:
-                logger.debug(f"Enqueued traceroute {trace_data['trace_id']}")
+                logger.info(f"Enqueued traceroute {trace_data['trace_id']}")
 
         except Exception as e:
-            logger.error(f"Error processing traceroute: {e}", exc_info=True)
+            logger.warn(f"Error processing traceroute: {e}")
 
     def get_stats(self) -> Optional[Dict[str, Any]]:
         """
@@ -570,7 +570,7 @@ class Plugin(Base):
             }
             return stats
         except Exception as e:
-            logger.error(f"Error getting stats: {e}")
+            logger.warn(f"Error getting stats: {e}")
             return None
 
     def cleanup(self, days: int = 7) -> int:
@@ -591,7 +591,7 @@ class Plugin(Base):
             logger.info(f"Cleaned up {count} old events (older than {days} days)")
             return count
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            logger.warn(f"Error during cleanup: {e}")
             return 0
 
     def __del__(self):
