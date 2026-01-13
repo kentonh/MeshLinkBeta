@@ -65,6 +65,22 @@ class Plugin(Base):
         """Initialize the federated uploader plugin."""
         super().__init__()
 
+        # Initialize attributes with defaults first
+        self.enabled = False
+        self.collector_id = None
+        self.api_url = None
+        self.token = None
+        self.outbox = None
+        self.outbox_db_path = './federated_outbox.sqlite'
+        self.enqueue_types = set()
+        self.export_enabled = False
+        self.export_thread = None
+        self.export_stop_event = threading.Event()
+        self.last_export_time = None
+        self.nodes_db_path = None
+        self.export_lookback_hours = 2
+        self.export_interval = 3600
+
         if OutboxManager is None:
             logger.warn("OutboxManager not available. Plugin will not function.")
             return
@@ -115,10 +131,8 @@ class Plugin(Base):
             self.enabled = False
             return
 
-        # Export thread control
-        self.export_thread = None
-        self.export_stop_event = threading.Event()
-        self.last_export_time = None
+        # Export thread control is already initialized above
+        # self.last_export_time is already initialized above
 
     def start(self):
         """Start the plugin and begin periodic exports if enabled."""
