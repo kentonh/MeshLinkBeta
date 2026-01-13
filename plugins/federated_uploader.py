@@ -82,8 +82,9 @@ class Plugin(Base):
         self.export_interval = 3600
 
         if OutboxManager is None:
-            logger.warn("OutboxManager not available. Plugin will not function.")
-            return
+            logger.warn("OutboxManager not available. Real-time packet capture disabled.")
+            logger.info("Periodic database export will still work if export_enabled=true")
+            # Don't return - continue with initialization for export-only mode
 
         # Load config from cfg module
         import cfg
@@ -117,19 +118,24 @@ class Plugin(Base):
         self.nodes_db_path = config.get('nodes_db_path', './nodes.db')
         self.export_lookback_hours = config.get('export_hours_lookback', 2)
 
-        # Initialize outbox manager for real-time packets
-        try:
-            self.outbox = OutboxManager(self.outbox_db_path, self.collector_id)
-            logger.info(f"Federated uploader initialized: collector_id='{self.collector_id}'")
+        # Initialize outbox manager for real-time packets (optional)
+        if OutboxManager is not None:
+            try:
+                self.outbox = OutboxManager(self.outbox_db_path, self.collector_id)
+                logger.info(f"OutboxManager initialized for real-time capture")
 
-            # Log initial stats
-            stats = self.outbox.get_stats()
-            logger.info(f"Outbox stats: {stats}")
+                # Log initial stats
+                stats = self.outbox.get_stats()
+                logger.info(f"Outbox stats: {stats}")
 
-        except Exception as e:
-            logger.warn(f"Failed to initialize OutboxManager: {e}")
-            self.enabled = False
-            return
+            except Exception as e:
+                logger.warn(f"Failed to initialize OutboxManager: {e}")
+                logger.warn("Real-time packet capture disabled, periodic export still available")
+                self.outbox = None
+        else:
+            logger.info("Running in export-only mode (no real-time packet capture)")
+
+        logger.info(f"Federated uploader initialized: collector_id='{self.collector_id}', export_enabled={self.export_enabled}")
 
         # Export thread control is already initialized above
         # self.last_export_time is already initialized above
@@ -141,14 +147,14 @@ class Plugin(Base):
 
         logger.info("Starting federated uploader plugin")
 
-        # Validate token
-        if not self.token:
-            logger.warn("No API token configured! Uploads will fail. Set 'token' in config.yml")
-
-        # Validate API URL
+        # Validate API URL (required)
         if not self.api_url:
             logger.warn("No API URL configured! Set 'api_url' in config.yml")
             return
+
+        # Token is optional for MeshMonitor integration
+        if not self.token:
+            logger.info("No API token configured (not needed for MeshMonitor)")
 
         # Start periodic export thread
         if self.export_enabled:
