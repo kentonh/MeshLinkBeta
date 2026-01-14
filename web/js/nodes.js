@@ -232,12 +232,14 @@ function getStatusBadge(node) {
     const now = new Date();
     const minutesAgo = (now - lastSeen) / 1000 / 60;
 
-    if (minutesAgo < 5) {
+    if (minutesAgo < 180) {
         return '<span class="status-badge status-online">● Online</span>';
-    } else if (minutesAgo < 60) {
+    } else if (minutesAgo < 360) {
         return '<span class="status-badge status-recent">● Recent</span>';
-    } else {
+    } else if (minutesAgo < 720) {
         return '<span class="status-badge status-offline">● Offline</span>';
+    } else {
+        return '<span class="status-badge status-unknown">● Unknown</span>';
     }
 }
 
