@@ -209,14 +209,12 @@ body {
     background: #667eea;
 }
 
-.legend-line.dashed {
-    background: repeating-linear-gradient(
-        90deg,
-        #667eea 0px,
-        #667eea 5px,
-        transparent 5px,
-        transparent 10px
-    );
+.legend-line.solid.thick {
+    height: 4px;
+}
+
+.legend-line.solid.thin {
+    height: 2px;
 }
 
 .legend-toggle {

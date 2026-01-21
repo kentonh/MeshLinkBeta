@@ -97,7 +97,6 @@ async function loadMapData(silent = false) {
 function updateStats(stats) {
     document.getElementById('stat-nodes').textContent = stats.nodesWithGps || 0;
     document.getElementById('stat-connections').textContent = stats.totalConnections || 0;
-    document.getElementById('stat-bidirectional').textContent = stats.bidirectionalConnections || 0;
     document.getElementById('stat-traceroutes').textContent = stats.tracerouteConnections || 0;
 }
 
@@ -288,7 +287,6 @@ function createNodePopup(node) {
 function drawConnection(fromNode, toNode, conn) {
     const color = getConnectionColor(conn.rssi, conn.snr);
     const weight = conn.isDirect ? 3 : 2;
-    const dashArray = conn.bidirectional ? null : '5, 10';
 
     const line = L.polyline([
         [fromNode.position.lat, fromNode.position.lon],
@@ -296,8 +294,7 @@ function drawConnection(fromNode, toNode, conn) {
     ], {
         color: color,
         weight: weight,
-        opacity: 0.7,
-        dashArray: dashArray
+        opacity: 0.7
     }).addTo(map);
 
     // Add popup with connection info
@@ -324,10 +321,6 @@ function drawConnection(fromNode, toNode, conn) {
                 <div class="popup-row">
                     <span class="popup-label">Packets:</span>
                     <span>${conn.packets || 0}</span>
-                </div>
-                <div class="popup-row">
-                    <span class="popup-label">Type:</span>
-                    <span>${conn.bidirectional ? 'Bidirectional' : 'Unidirectional'}</span>
                 </div>
                 <div class="popup-row">
                     <span class="popup-label">Connection:</span>

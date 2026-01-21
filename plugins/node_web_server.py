@@ -469,20 +469,8 @@ class NodeWebServer(plugins.Base):
                             'lastHeard': link.get('last_heard_utc'),
                             'isActive': link.get('is_active', False),
                             'hopCount': link.get('last_hop_count', 1),
-                            'bidirectional': False,  # Will be calculated below
                             'isDirect': link.get('last_hop_count', 1) == 1
                         })
-
-                # Detect bidirectional connections
-                connection_set = set()
-                for conn in connections:
-                    key = tuple(sorted([conn['from'], conn['to']]))
-                    if key in connection_set:
-                        # Mark both directions as bidirectional
-                        for c in connections:
-                            if tuple(sorted([c['from'], c['to']])) == key:
-                                c['bidirectional'] = True
-                    connection_set.add(key)
 
                 # Get traceroutes and add those connections too
                 traceroutes = self.db.get_all_traceroutes(limit=100)
@@ -520,7 +508,6 @@ class NodeWebServer(plugins.Base):
                     'totalNodes': len(all_nodes),
                     'nodesWithGps': len(nodes_with_gps),
                     'totalConnections': len(connections),
-                    'bidirectionalConnections': len([c for c in connections if c['bidirectional']]),
                     'tracerouteConnections': len(traceroute_connections),
                     'mapCenter': map_center
                 }
