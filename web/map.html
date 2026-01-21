@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeshLink Network Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="css/map.css">
+</head>
+<body>
+    <div class="map-page">
+        <!-- Header -->
+        <header class="map-header">
+            <div class="header-left">
+                <h1>MeshLink Network Map</h1>
+            </div>
+            <div class="header-controls">
+                <select id="time-window" class="control-select">
+                    <option value="1">Last 1 Hour</option>
+                    <option value="6">Last 6 Hours</option>
+                    <option value="24" selected>Last 24 Hours</option>
+                    <option value="168">Last 7 Days</option>
+                    <option value="720">Last 30 Days</option>
+                </select>
+                <button id="refresh-btn" class="control-btn">Refresh</button>
+                <a href="/nodes.html" class="control-btn nav-btn">Node List</a>
+                <a href="/traceroutes.html" class="control-btn nav-btn">Traceroutes</a>
+            </div>
+        </header>
+
+        <!-- Stats Bar -->
+        <div class="stats-bar">
+            <div class="stat-item">
+                <span class="stat-label">Nodes on Map:</span>
+                <span id="stat-nodes" class="stat-value">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Connections:</span>
+                <span id="stat-connections" class="stat-value">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Bidirectional:</span>
+                <span id="stat-bidirectional" class="stat-value">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Traceroutes:</span>
+                <span id="stat-traceroutes" class="stat-value">0</span>
+            </div>
+            <div class="stat-item loading-indicator" id="loading-indicator">
+                <span class="spinner"></span>
+                <span>Loading...</span>
+            </div>
+        </div>
+
+        <!-- Map Container -->
+        <div id="map-container">
+            <div id="map"></div>
+        </div>
+
+        <!-- Legend -->
+        <div class="map-legend" id="map-legend">
+            <div class="legend-section">
+                <div class="legend-title">Node Status (Last Heard)</div>
+                <div class="legend-item">
+                    <span class="legend-marker" style="background: #4caf50;"></span>
+                    <span>Online (&lt;1 hour)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-marker" style="background: #8bc34a;"></span>
+                    <span>Recent (&lt;24 hours)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-marker" style="background: #ffc107;"></span>
+                    <span>This Week</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-marker" style="background: #f44336;"></span>
+                    <span>Older (&gt;7 days)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-marker" style="background: #9e9e9e;"></span>
+                    <span>Unknown</span>
+                </div>
+            </div>
+            <div class="legend-section">
+                <div class="legend-title">Connection Quality (Signal)</div>
+                <div class="legend-item">
+                    <span class="legend-line" style="background: #4caf50;"></span>
+                    <span>Good (RSSI &gt; -90)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-line" style="background: #ffc107;"></span>
+                    <span>Fair</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-line" style="background: #f44336;"></span>
+                    <span>Poor (RSSI &lt; -110)</span>
+                </div>
+            </div>
+            <div class="legend-section">
+                <div class="legend-title">Line Style</div>
+                <div class="legend-item">
+                    <span class="legend-line solid"></span>
+                    <span>Bidirectional</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-line dashed"></span>
+                    <span>Unidirectional</span>
+                </div>
+            </div>
+            <div class="legend-section">
+                <div class="legend-title">Node Size</div>
+                <div class="legend-item">
+                    <span>Larger = Higher Battery</span>
+                </div>
+            </div>
+            <button class="legend-toggle" id="legend-toggle">Hide Legend</button>
+        </div>
+
+        <!-- Node Details Panel -->
+        <div class="details-panel" id="details-panel">
+            <div class="details-header">
+                <h3 id="details-title">Node Details</h3>
+                <button class="close-btn" id="close-details">&times;</button>
+            </div>
+            <div class="details-content" id="details-content">
+                <!-- Populated by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="js/map.js"></script>
+</body>
+</html>

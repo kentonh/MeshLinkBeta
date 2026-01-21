@@ -75,6 +75,15 @@ class NodeWebServer(plugins.Base):
             except Exception as e:
                 logger.warn(f"Failed to serve nodes.html: {e}")
                 return "<h1>Node Tracking</h1><p>Web interface not yet available. Use API endpoints.</p>"
+
+        @self.app.route('/map.html')
+        def map_page():
+            """Serve network map page"""
+            try:
+                return send_from_directory(web_dir, 'map.html')
+            except Exception as e:
+                logger.warn(f"Failed to serve map.html: {e}")
+                return "<h1>Network Map</h1><p>Map interface not yet available.</p>"
         
         @self.app.route('/api/nodes', methods=['GET'])
         def get_nodes():
@@ -398,6 +407,136 @@ class NodeWebServer(plugins.Base):
                     'traceroutes': traceroutes
                 })
             except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+
+        @self.app.route('/api/map-data', methods=['GET'])
+        def get_map_data():
+            """Get combined data for map visualization including nodes, connections, and traceroutes"""
+            try:
+                from datetime import datetime, timedelta
+
+                # Get time window from query params (default 24 hours)
+                hours = int(request.args.get('hours', 24))
+                time_cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+
+                # Get all nodes
+                all_nodes = self.db.get_all_nodes()
+
+                # Filter to nodes with GPS coordinates
+                nodes_with_gps = []
+                node_lookup = {}  # For quick lookup by node_id
+
+                for node in all_nodes:
+                    if node.get('latitude') and node.get('longitude'):
+                        node_data = {
+                            'id': node['node_id'],
+                            'name': node.get('long_name') or node.get('short_name') or node['node_id'],
+                            'shortName': node.get('short_name') or node['node_id'][-4:],
+                            'position': {
+                                'lat': node['latitude'],
+                                'lon': node['longitude'],
+                                'alt': node.get('altitude')
+                            },
+                            'battery': node.get('battery_level'),
+                            'hwModel': node.get('hardware_model'),
+                            'lastHeard': node.get('last_seen_utc'),
+                            'totalPackets': node.get('total_packets_received', 0),
+                            'isMqtt': node.get('is_mqtt', False)
+                        }
+                        nodes_with_gps.append(node_data)
+                        node_lookup[node['node_id']] = node_data
+
+                # Get topology connections
+                topology = self.db.get_topology(active_only=False)
+                connections = []
+
+                for link in topology:
+                    source_id = link['source_node_id']
+                    target_id = link['neighbor_node_id']
+
+                    # Only include connections where both nodes have GPS
+                    if source_id in node_lookup and target_id in node_lookup:
+                        connections.append({
+                            'from': source_id,
+                            'to': target_id,
+                            'rssi': link.get('avg_rssi'),
+                            'snr': link.get('avg_snr'),
+                            'quality': link.get('link_quality_score'),
+                            'packets': link.get('total_packets', 0),
+                            'lastHeard': link.get('last_heard_utc'),
+                            'isActive': link.get('is_active', False),
+                            'hopCount': link.get('last_hop_count', 1),
+                            'bidirectional': False,  # Will be calculated below
+                            'isDirect': link.get('last_hop_count', 1) == 1
+                        })
+
+                # Detect bidirectional connections
+                connection_set = set()
+                for conn in connections:
+                    key = tuple(sorted([conn['from'], conn['to']]))
+                    if key in connection_set:
+                        # Mark both directions as bidirectional
+                        for c in connections:
+                            if tuple(sorted([c['from'], c['to']])) == key:
+                                c['bidirectional'] = True
+                    connection_set.add(key)
+
+                # Get traceroutes and add those connections too
+                traceroutes = self.db.get_all_traceroutes(limit=100)
+                traceroute_connections = []
+
+                for trace in traceroutes:
+                    route = trace.get('route', [])
+                    snr_data = trace.get('snr_data') or []
+
+                    for i in range(len(route) - 1):
+                        from_id = route[i]
+                        to_id = route[i + 1]
+
+                        # Only include if both nodes have GPS
+                        if from_id in node_lookup and to_id in node_lookup:
+                            snr = snr_data[i] if i < len(snr_data) else None
+                            traceroute_connections.append({
+                                'from': from_id,
+                                'to': to_id,
+                                'snr': snr,
+                                'fromTraceroute': True,
+                                'traceTime': trace.get('received_at_utc')
+                            })
+
+                # Calculate map center (average of all node positions)
+                if nodes_with_gps:
+                    avg_lat = sum(n['position']['lat'] for n in nodes_with_gps) / len(nodes_with_gps)
+                    avg_lon = sum(n['position']['lon'] for n in nodes_with_gps) / len(nodes_with_gps)
+                    map_center = [avg_lat, avg_lon]
+                else:
+                    map_center = [0, 0]
+
+                # Stats
+                stats = {
+                    'totalNodes': len(all_nodes),
+                    'nodesWithGps': len(nodes_with_gps),
+                    'totalConnections': len(connections),
+                    'bidirectionalConnections': len([c for c in connections if c['bidirectional']]),
+                    'tracerouteConnections': len(traceroute_connections),
+                    'mapCenter': map_center
+                }
+
+                return jsonify({
+                    'success': True,
+                    'nodes': nodes_with_gps,
+                    'connections': connections,
+                    'tracerouteConnections': traceroute_connections,
+                    'stats': stats
+                })
+
+            except Exception as e:
+                logger.warn(f"Error getting map data: {e}")
+                import traceback
+                traceback.print_exc()
                 return jsonify({
                     'success': False,
                     'error': str(e)
