@@ -18,7 +18,7 @@ import time
 
 class NodeTracking(plugins.Base):
     """Main plugin for node tracking and network topology"""
-    
+
     # Class variables shared across all instances
     _db = None
     _exporter = None
@@ -26,6 +26,9 @@ class NodeTracking(plugins.Base):
     _last_export_time = 0
     _export_interval = 60  # Export every 60 seconds
     _topology_cleanup_timer = None
+    _auto_traceroute_timer = None
+    _interface = None
+    _traceroute_in_progress = False
     
     def __init__(self):
         pass
@@ -59,6 +62,16 @@ class NodeTracking(plugins.Base):
                 'link_timeout_minutes': 60,
                 'min_packets_for_link': 3,
                 'calculate_link_quality': True
+            },
+            'auto_traceroute': {
+                'enabled': False,
+                'interval_minutes': 30,
+                'traceroute_age_hours': 4,
+                'active_threshold_minutes': 60,
+                'hop_limit': 7,
+                'max_per_cycle': 5,
+                'delay_seconds': 10,
+                'exclude_mqtt_nodes': True
             }
         })
         
@@ -606,14 +619,122 @@ class NodeTracking(plugins.Base):
         
         # Start initial cleanup
         cleanup()
-    
+
+    def _start_auto_traceroute(self):
+        """Start periodic auto-traceroute timer"""
+        auto_tr_config = NodeTracking._config.get('auto_traceroute', {})
+        interval_minutes = auto_tr_config.get('interval_minutes', 30)
+
+        def run_cycle():
+            try:
+                self._perform_auto_traceroute_cycle()
+            except Exception as e:
+                logger.warn(f"Error in auto-traceroute cycle: {e}")
+
+            # Schedule next cycle if still enabled
+            if NodeTracking._config.get('enabled', True) and auto_tr_config.get('enabled', False):
+                NodeTracking._auto_traceroute_timer = threading.Timer(interval_minutes * 60, run_cycle)
+                NodeTracking._auto_traceroute_timer.daemon = True
+                NodeTracking._auto_traceroute_timer.start()
+
+        logger.infogreen(f"Auto-traceroute enabled: checking every {interval_minutes} minutes")
+
+        # Start first cycle after the interval (not immediately on connect)
+        NodeTracking._auto_traceroute_timer = threading.Timer(interval_minutes * 60, run_cycle)
+        NodeTracking._auto_traceroute_timer.daemon = True
+        NodeTracking._auto_traceroute_timer.start()
+
+    def _perform_auto_traceroute_cycle(self):
+        """Query DB for nodes needing traceroutes and send them"""
+        if NodeTracking._traceroute_in_progress:
+            logger.info("Auto-traceroute: cycle already in progress, skipping")
+            return
+
+        if not NodeTracking._interface:
+            logger.warn("Auto-traceroute: no interface available")
+            return
+
+        NodeTracking._traceroute_in_progress = True
+
+        try:
+            auto_tr_config = NodeTracking._config.get('auto_traceroute', {})
+
+            # Get config values
+            active_threshold = auto_tr_config.get('active_threshold_minutes', 60)
+            traceroute_age = auto_tr_config.get('traceroute_age_hours', 4)
+            max_per_cycle = auto_tr_config.get('max_per_cycle', 5)
+            delay_seconds = auto_tr_config.get('delay_seconds', 10)
+            exclude_mqtt = auto_tr_config.get('exclude_mqtt_nodes', True)
+            hop_limit = auto_tr_config.get('hop_limit', 7)
+
+            # Query nodes needing traceroutes
+            nodes = NodeTracking._db.get_nodes_needing_traceroute(
+                active_threshold_minutes=active_threshold,
+                traceroute_age_hours=traceroute_age,
+                exclude_mqtt=exclude_mqtt,
+                limit=max_per_cycle
+            )
+
+            if not nodes:
+                logger.info("Auto-traceroute: no nodes need traceroutes at this time")
+                return
+
+            logger.infogreen(f"Auto-traceroute: sending traceroutes to {len(nodes)} nodes")
+
+            # Import meshtastic modules for traceroute
+            from meshtastic import mesh_pb2, portnums_pb2
+
+            for i, node in enumerate(nodes):
+                try:
+                    node_num = node['node_num']
+                    node_name = node.get('long_name') or node.get('short_name') or node['node_id']
+                    last_tr = node.get('last_traceroute_utc') or 'never'
+
+                    logger.info(f"Auto-traceroute: sending to {node_name} ({node['node_id']}) - last traceroute: {last_tr}")
+
+                    # Create RouteDiscovery request
+                    r = mesh_pb2.RouteDiscovery()
+
+                    # Send traceroute request (non-blocking)
+                    NodeTracking._interface.sendData(
+                        r,
+                        destinationId=node_num,
+                        portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
+                        wantResponse=True,
+                        hopLimit=hop_limit
+                    )
+
+                    # Delay between traceroutes (except for the last one)
+                    if i < len(nodes) - 1 and delay_seconds > 0:
+                        time.sleep(delay_seconds)
+
+                except Exception as e:
+                    logger.warn(f"Auto-traceroute: failed to send to {node.get('node_id')}: {e}")
+
+            logger.infogreen(f"Auto-traceroute: cycle complete, sent {len(nodes)} traceroutes")
+
+        except Exception as e:
+            logger.warn(f"Auto-traceroute: cycle error: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            NodeTracking._traceroute_in_progress = False
+
     def onConnect(self, interface, client):
         """Handle connection to node"""
         if not NodeTracking._config or not NodeTracking._config.get('enabled', True):
             return
-        
+
+        # Store interface for auto-traceroute
+        NodeTracking._interface = interface
+
         logger.info("Node tracking ready - will capture all packets")
-        
+
+        # Start auto-traceroute if enabled
+        auto_tr_config = NodeTracking._config.get('auto_traceroute', {})
+        if auto_tr_config.get('enabled', False):
+            self._start_auto_traceroute()
+
         # Do initial export
         self._export_data()
     
@@ -621,10 +742,18 @@ class NodeTracking(plugins.Base):
         """Handle disconnection from node"""
         if not NodeTracking._config or not NodeTracking._config.get('enabled', True):
             return
-        
+
         # Export data before shutdown
         self._export_data()
-        
+
         # Cancel cleanup timer
         if NodeTracking._topology_cleanup_timer:
             NodeTracking._topology_cleanup_timer.cancel()
+
+        # Cancel auto-traceroute timer
+        if NodeTracking._auto_traceroute_timer:
+            NodeTracking._auto_traceroute_timer.cancel()
+            NodeTracking._auto_traceroute_timer = None
+
+        # Clear interface reference
+        NodeTracking._interface = None

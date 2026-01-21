@@ -626,6 +626,72 @@ class NodeDatabase:
             logger.warn(f"Failed to get traceroutes for node {node_id}: {e}")
             return []
 
+    def get_nodes_needing_traceroute(self, active_threshold_minutes: int = 60,
+                                      traceroute_age_hours: int = 4,
+                                      exclude_mqtt: bool = True,
+                                      limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get nodes that need a traceroute sent to them.
+
+        Args:
+            active_threshold_minutes: Node must be seen within this time to be "active"
+            traceroute_age_hours: Send traceroute if last one older than this
+            exclude_mqtt: Don't include MQTT-only nodes
+            limit: Maximum number of nodes to return
+
+        Returns:
+            List of nodes needing traceroutes, ordered by: never-traced first, then oldest traceroute
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Calculate time thresholds
+            active_cutoff = (datetime.utcnow() - timedelta(minutes=active_threshold_minutes)).isoformat()
+            traceroute_cutoff = (datetime.utcnow() - timedelta(hours=traceroute_age_hours)).isoformat()
+
+            # Build query to find active nodes needing traceroutes
+            # LEFT JOIN with traceroutes to find last traceroute per node (by to_node_id)
+            query = """
+                SELECT
+                    n.node_id,
+                    n.node_num,
+                    n.long_name,
+                    n.short_name,
+                    n.is_mqtt,
+                    n.last_seen_utc,
+                    MAX(t.received_at_utc) as last_traceroute_utc
+                FROM nodes n
+                LEFT JOIN traceroutes t ON n.node_id = t.to_node_id
+                WHERE n.last_seen_utc >= ?
+                  AND n.node_num IS NOT NULL
+            """
+
+            params = [active_cutoff]
+
+            if exclude_mqtt:
+                query += " AND (n.is_mqtt = 0 OR n.is_mqtt IS NULL)"
+
+            query += """
+                GROUP BY n.node_id, n.node_num, n.long_name, n.short_name, n.is_mqtt, n.last_seen_utc
+                HAVING last_traceroute_utc IS NULL OR last_traceroute_utc < ?
+                ORDER BY
+                    CASE WHEN last_traceroute_utc IS NULL THEN 0 ELSE 1 END,
+                    last_traceroute_utc ASC
+                LIMIT ?
+            """
+
+            params.extend([traceroute_cutoff, limit])
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.warn(f"Failed to get nodes needing traceroute: {e}")
+            return []
+
     def close(self):
         """Close database connection"""
         if hasattr(_thread_local, 'connection'):

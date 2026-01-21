@@ -70,6 +70,17 @@ node_tracking:
     min_packets_for_link: 3              # Minimum packets required to establish valid link
     calculate_link_quality: true          # Calculate link quality scores based on SNR/RSSI
   
+  # Automatic traceroute configuration
+  auto_traceroute:
+    enabled: false                        # Enable automatic traceroute sending
+    interval_minutes: 30                  # How often to check and send traceroutes
+    traceroute_age_hours: 4               # Send traceroute if last one older than this
+    active_threshold_minutes: 60          # Node must be seen within this time to be "active"
+    hop_limit: 7                          # Maximum hops for traceroute
+    max_per_cycle: 5                      # Max traceroutes per check cycle
+    delay_seconds: 10                     # Delay between sending each traceroute
+    exclude_mqtt_nodes: true              # Don't traceroute MQTT-only nodes
+
   # Battery monitoring alerts (optional)
   battery_alerts:
     enabled: false                        # Enable battery alerts
@@ -83,7 +94,7 @@ node_tracking:
 #   2. Periodic database export: Background thread exports nodes.db data directly to MeshMonitor
 federated_uploader:
   enabled: false                         # Set to true to enable uploading to MeshMonitor
-  collector_id: "meshlink-collector-01"  # Unique identifier for this collector
+  collector_id: "!ffffff"  # Unique node ID for this collector node
   api_url: "http://localhost:5000"       # MeshMonitor API URL (update to your server's address)
   token: ""                              # Not used for MeshMonitor (kept for compatibility)
 
