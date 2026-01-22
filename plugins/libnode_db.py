@@ -136,6 +136,39 @@ class NodeDatabase:
                 )
             """)
 
+            # Create traceroute_attempts table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS traceroute_attempts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    to_node_id TEXT NOT NULL,
+                    to_node_name TEXT,
+                    requested_at_utc TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    completed_at_utc TEXT,
+                    traceroute_id INTEGER,
+                    FOREIGN KEY (to_node_id) REFERENCES nodes(node_id),
+                    FOREIGN KEY (traceroute_id) REFERENCES traceroutes(id)
+                )
+            """)
+
+            # Create telemetry_requests table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS telemetry_requests (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    to_node_id TEXT NOT NULL,
+                    to_node_name TEXT,
+                    requested_at_utc TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    completed_at_utc TEXT,
+                    rx_snr REAL,
+                    rx_rssi INTEGER,
+                    relay_node_id TEXT,
+                    relay_node_name TEXT,
+                    hops_away INTEGER,
+                    FOREIGN KEY (to_node_id) REFERENCES nodes(node_id)
+                )
+            """)
+
             # Create indexes
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_packet_node ON packet_history(node_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_packet_time ON packet_history(received_at_utc)")
@@ -144,6 +177,12 @@ class NodeDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_topology_active ON network_topology(is_active)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_traceroute_from ON traceroutes(from_node_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_traceroute_time ON traceroutes(received_at_utc)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_attempt_to_node ON traceroute_attempts(to_node_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_attempt_status ON traceroute_attempts(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_attempt_time ON traceroute_attempts(requested_at_utc)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_to_node ON telemetry_requests(to_node_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_status ON telemetry_requests(status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_requests(requested_at_utc)")
             
             conn.commit()
             logger.infogreen("Node tracking database initialized successfully")
@@ -503,8 +542,8 @@ class NodeDatabase:
     
     def insert_traceroute(self, from_node_id: str, route_ids: List[str],
                           to_node_id: Optional[str] = None, snr_data: Optional[List[float]] = None,
-                          packet_id: Optional[int] = None) -> bool:
-        """Insert a traceroute record"""
+                          packet_id: Optional[int] = None) -> Optional[int]:
+        """Insert a traceroute record. Returns the traceroute ID or None on failure."""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
@@ -522,11 +561,11 @@ class NodeDatabase:
             """, (from_node_id, to_node_id, route_json, hop_count, now, snr_json, packet_id))
 
             conn.commit()
-            return True
+            return cursor.lastrowid
 
         except Exception as e:
             logger.warn(f"Failed to insert traceroute: {e}")
-            return False
+            return None
 
     def get_all_traceroutes(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get all traceroutes ordered by most recent"""
@@ -700,6 +739,370 @@ class NodeDatabase:
         except Exception as e:
             logger.warn(f"Failed to get nodes needing traceroute: {e}")
             return []
+
+    def insert_traceroute_attempt(self, to_node_id: str, to_node_name: Optional[str] = None) -> Optional[int]:
+        """Log a traceroute attempt when sending a request"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            now = datetime.utcnow().isoformat()
+
+            cursor.execute("""
+                INSERT INTO traceroute_attempts (to_node_id, to_node_name, requested_at_utc, status)
+                VALUES (?, ?, ?, 'pending')
+            """, (to_node_id, to_node_name, now))
+
+            conn.commit()
+            return cursor.lastrowid
+
+        except Exception as e:
+            logger.warn(f"Failed to insert traceroute attempt: {e}")
+            return None
+
+    def complete_traceroute_attempt(self, to_node_id: str, traceroute_id: Optional[int] = None) -> bool:
+        """Mark the most recent pending attempt to a node as completed"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            now = datetime.utcnow().isoformat()
+
+            # Find the most recent pending attempt to this node
+            cursor.execute("""
+                UPDATE traceroute_attempts
+                SET status = 'completed', completed_at_utc = ?, traceroute_id = ?
+                WHERE id = (
+                    SELECT id FROM traceroute_attempts
+                    WHERE to_node_id = ? AND status = 'pending'
+                    ORDER BY requested_at_utc DESC
+                    LIMIT 1
+                )
+            """, (now, traceroute_id, to_node_id))
+
+            conn.commit()
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.warn(f"Failed to complete traceroute attempt: {e}")
+            return False
+
+    def timeout_stale_attempts(self, timeout_seconds: int = 120) -> int:
+        """Mark pending attempts older than timeout as timed out"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            timeout_cutoff = (datetime.utcnow() - timedelta(seconds=timeout_seconds)).isoformat()
+
+            cursor.execute("""
+                UPDATE traceroute_attempts
+                SET status = 'timeout'
+                WHERE status = 'pending' AND requested_at_utc < ?
+            """, (timeout_cutoff,))
+
+            conn.commit()
+            return cursor.rowcount
+
+        except Exception as e:
+            logger.warn(f"Failed to timeout stale attempts: {e}")
+            return 0
+
+    def get_traceroute_attempts(self, limit: int = 100, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get traceroute attempts, optionally filtered by status"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            if status:
+                cursor.execute("""
+                    SELECT a.*, t.hop_count, t.route_json
+                    FROM traceroute_attempts a
+                    LEFT JOIN traceroutes t ON a.traceroute_id = t.id
+                    WHERE a.status = ?
+                    ORDER BY a.requested_at_utc DESC
+                    LIMIT ?
+                """, (status, limit))
+            else:
+                cursor.execute("""
+                    SELECT a.*, t.hop_count, t.route_json
+                    FROM traceroute_attempts a
+                    LEFT JOIN traceroutes t ON a.traceroute_id = t.id
+                    ORDER BY a.requested_at_utc DESC
+                    LIMIT ?
+                """, (limit,))
+
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.warn(f"Failed to get traceroute attempts: {e}")
+            return []
+
+    def get_attempt_stats(self) -> Dict[str, Any]:
+        """Get statistics about traceroute attempts"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            stats = {}
+
+            # Count by status
+            cursor.execute("""
+                SELECT status, COUNT(*) as count
+                FROM traceroute_attempts
+                GROUP BY status
+            """)
+            for row in cursor.fetchall():
+                stats[f"attempts_{row['status']}"] = row['count']
+
+            # Recent success rate (last 24 hours)
+            cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+            cursor.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                    SUM(CASE WHEN status = 'timeout' THEN 1 ELSE 0 END) as timeout
+                FROM traceroute_attempts
+                WHERE requested_at_utc >= ?
+            """, (cutoff,))
+            row = cursor.fetchone()
+            if row and row['total'] > 0:
+                stats['recent_total'] = row['total']
+                stats['recent_completed'] = row['completed']
+                stats['recent_timeout'] = row['timeout']
+                stats['recent_success_rate'] = round(row['completed'] / row['total'] * 100, 1)
+
+            return stats
+
+        except Exception as e:
+            logger.warn(f"Failed to get attempt stats: {e}")
+            return {}
+
+    # Telemetry request tracking methods
+
+    def insert_telemetry_request(self, to_node_id: str, to_node_name: Optional[str] = None) -> Optional[int]:
+        """Log a telemetry request when sending"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            now = datetime.utcnow().isoformat()
+
+            cursor.execute("""
+                INSERT INTO telemetry_requests (to_node_id, to_node_name, requested_at_utc, status)
+                VALUES (?, ?, ?, 'pending')
+            """, (to_node_id, to_node_name, now))
+
+            conn.commit()
+            return cursor.lastrowid
+
+        except Exception as e:
+            logger.warn(f"Failed to insert telemetry request: {e}")
+            return None
+
+    def complete_telemetry_request(self, from_node_id: str, rx_snr: Optional[float] = None,
+                                    rx_rssi: Optional[int] = None, relay_node_id: Optional[str] = None,
+                                    relay_node_name: Optional[str] = None, hops_away: Optional[int] = None) -> bool:
+        """Mark the most recent pending telemetry request from a node as completed"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            now = datetime.utcnow().isoformat()
+
+            # Find the most recent pending request to this node
+            cursor.execute("""
+                UPDATE telemetry_requests
+                SET status = 'completed', completed_at_utc = ?,
+                    rx_snr = ?, rx_rssi = ?, relay_node_id = ?, relay_node_name = ?, hops_away = ?
+                WHERE id = (
+                    SELECT id FROM telemetry_requests
+                    WHERE to_node_id = ? AND status = 'pending'
+                    ORDER BY requested_at_utc DESC
+                    LIMIT 1
+                )
+            """, (now, rx_snr, rx_rssi, relay_node_id, relay_node_name, hops_away, from_node_id))
+
+            conn.commit()
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.warn(f"Failed to complete telemetry request: {e}")
+            return False
+
+    def timeout_stale_telemetry_requests(self, timeout_seconds: int = 120) -> int:
+        """Mark pending telemetry requests older than timeout as timed out"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            timeout_cutoff = (datetime.utcnow() - timedelta(seconds=timeout_seconds)).isoformat()
+
+            cursor.execute("""
+                UPDATE telemetry_requests
+                SET status = 'timeout'
+                WHERE status = 'pending' AND requested_at_utc < ?
+            """, (timeout_cutoff,))
+
+            conn.commit()
+            return cursor.rowcount
+
+        except Exception as e:
+            logger.warn(f"Failed to timeout stale telemetry requests: {e}")
+            return 0
+
+    def get_nodes_needing_telemetry_request(self, active_threshold_minutes: int = 120,
+                                             request_age_hours: int = 2,
+                                             exclude_mqtt: bool = True,
+                                             skip_recent_traceroutes: bool = True,
+                                             traceroute_age_hours: int = 4,
+                                             limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get nodes that need a telemetry request sent to them.
+
+        Args:
+            active_threshold_minutes: Node must be seen within this time to be "active"
+            request_age_hours: Send request if last successful one older than this
+            exclude_mqtt: Don't include MQTT-only nodes
+            skip_recent_traceroutes: Skip nodes with successful recent traceroutes
+            traceroute_age_hours: What counts as "recent" for traceroutes
+            limit: Maximum number of nodes to return
+
+        Returns:
+            List of nodes needing telemetry requests
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            # Calculate time thresholds
+            active_cutoff = (datetime.utcnow() - timedelta(minutes=active_threshold_minutes)).isoformat()
+            request_cutoff = (datetime.utcnow() - timedelta(hours=request_age_hours)).isoformat()
+            traceroute_cutoff = (datetime.utcnow() - timedelta(hours=traceroute_age_hours)).isoformat()
+
+            # Build query
+            query = """
+                SELECT
+                    n.node_id,
+                    n.node_num,
+                    n.long_name,
+                    n.short_name,
+                    n.is_mqtt,
+                    n.last_seen_utc,
+                    MAX(tr.completed_at_utc) as last_telemetry_request_utc,
+                    MAX(t.received_at_utc) as last_traceroute_utc
+                FROM nodes n
+                LEFT JOIN telemetry_requests tr ON n.node_id = tr.to_node_id AND tr.status = 'completed'
+                LEFT JOIN traceroutes t ON n.node_id = t.to_node_id
+                WHERE n.last_seen_utc >= ?
+                  AND n.node_num IS NOT NULL
+            """
+
+            params = [active_cutoff]
+
+            if exclude_mqtt:
+                query += " AND (n.is_mqtt = 0 OR n.is_mqtt IS NULL)"
+
+            query += """
+                GROUP BY n.node_id, n.node_num, n.long_name, n.short_name, n.is_mqtt, n.last_seen_utc
+                HAVING (last_telemetry_request_utc IS NULL OR last_telemetry_request_utc < ?)
+            """
+            params.append(request_cutoff)
+
+            if skip_recent_traceroutes:
+                query += " AND (last_traceroute_utc IS NULL OR last_traceroute_utc < ?)"
+                params.append(traceroute_cutoff)
+
+            query += """
+                ORDER BY
+                    CASE WHEN last_telemetry_request_utc IS NULL THEN 0 ELSE 1 END,
+                    last_telemetry_request_utc ASC
+                LIMIT ?
+            """
+            params.append(limit)
+
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.warn(f"Failed to get nodes needing telemetry request: {e}")
+            return []
+
+    def get_telemetry_requests(self, limit: int = 100, status: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Get telemetry requests, optionally filtered by status"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            if status:
+                cursor.execute("""
+                    SELECT * FROM telemetry_requests
+                    WHERE status = ?
+                    ORDER BY requested_at_utc DESC
+                    LIMIT ?
+                """, (status, limit))
+            else:
+                cursor.execute("""
+                    SELECT * FROM telemetry_requests
+                    ORDER BY requested_at_utc DESC
+                    LIMIT ?
+                """, (limit,))
+
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.warn(f"Failed to get telemetry requests: {e}")
+            return []
+
+    def get_telemetry_request_stats(self) -> Dict[str, Any]:
+        """Get statistics about telemetry requests"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            stats = {}
+
+            # Count by status
+            cursor.execute("""
+                SELECT status, COUNT(*) as count
+                FROM telemetry_requests
+                GROUP BY status
+            """)
+            for row in cursor.fetchall():
+                stats[f"telemetry_{row['status']}"] = row['count']
+
+            # Recent success rate (last 24 hours)
+            cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+            cursor.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+                    SUM(CASE WHEN status = 'timeout' THEN 1 ELSE 0 END) as timeout,
+                    AVG(CASE WHEN status = 'completed' THEN rx_snr END) as avg_snr,
+                    AVG(CASE WHEN status = 'completed' THEN rx_rssi END) as avg_rssi
+                FROM telemetry_requests
+                WHERE requested_at_utc >= ?
+            """, (cutoff,))
+            row = cursor.fetchone()
+            if row and row['total'] > 0:
+                stats['telemetry_recent_total'] = row['total']
+                stats['telemetry_recent_completed'] = row['completed']
+                stats['telemetry_recent_timeout'] = row['timeout']
+                stats['telemetry_recent_success_rate'] = round(row['completed'] / row['total'] * 100, 1)
+                if row['avg_snr']:
+                    stats['telemetry_avg_snr'] = round(row['avg_snr'], 1)
+                if row['avg_rssi']:
+                    stats['telemetry_avg_rssi'] = round(row['avg_rssi'], 0)
+
+            return stats
+
+        except Exception as e:
+            logger.warn(f"Failed to get telemetry request stats: {e}")
+            return {}
 
     def close(self):
         """Close database connection"""

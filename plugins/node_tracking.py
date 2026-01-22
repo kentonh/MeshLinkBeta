@@ -27,8 +27,10 @@ class NodeTracking(plugins.Base):
     _export_interval = 60  # Export every 60 seconds
     _topology_cleanup_timer = None
     _auto_traceroute_timer = None
+    _auto_telemetry_timer = None
     _interface = None
     _traceroute_in_progress = False
+    _telemetry_request_in_progress = False
     
     def __init__(self):
         pass
@@ -72,6 +74,16 @@ class NodeTracking(plugins.Base):
                 'max_per_cycle': 5,
                 'delay_seconds': 10,
                 'exclude_mqtt_nodes': True
+            },
+            'auto_telemetry': {
+                'enabled': False,
+                'interval_minutes': 15,
+                'request_age_hours': 2,
+                'active_threshold_minutes': 120,
+                'max_per_cycle': 10,
+                'delay_seconds': 5,
+                'exclude_mqtt_nodes': True,
+                'skip_nodes_with_recent_traceroute': True
             }
         })
         
@@ -134,6 +146,10 @@ class NodeTracking(plugins.Base):
             # Process traceroute packets for detailed topology
             if portnum == 'TRACEROUTE_APP':
                 self._process_traceroute(packet, interface)
+
+            # Process telemetry packets - check if this is a response to our request
+            if portnum == 'TELEMETRY_APP':
+                self._process_telemetry_response(packet, interface)
 
             # Auto-export if enabled
             if NodeTracking._config.get('auto_export_json', False):
@@ -576,12 +592,17 @@ class NodeTracking(plugins.Base):
             # Store the SNR towards data for the route
             snr_data = snr_towards if snr_towards else None
 
-            NodeTracking._db.insert_traceroute(
+            traceroute_id = NodeTracking._db.insert_traceroute(
                 from_node_id=from_node_id,
                 to_node_id=to_node_id,
                 route_ids=route_ids,  # May be empty for incomplete traceroutes
                 snr_data=snr_data
             )
+
+            # Mark any pending attempt to this node as completed
+            # The traceroute response comes FROM the destination node
+            if from_node_id:
+                NodeTracking._db.complete_traceroute_attempt(from_node_id, traceroute_id)
 
             if route_ids:
                 logger.infogreen(f"Traceroute stored: {len(route_ids)} nodes, {' -> '.join([rid[-4:] for rid in route_ids])}")
@@ -592,7 +613,65 @@ class NodeTracking(plugins.Base):
             logger.warn(f"Error processing traceroute: {e}")
             import traceback
             traceback.print_exc()
-    
+
+    def _process_telemetry_response(self, packet: Dict[str, Any], interface):
+        """Process telemetry packets to check if they're responses to our requests"""
+        try:
+            from_node_id = packet.get('fromId')
+            if not from_node_id:
+                return
+
+            # Extract signal quality metadata
+            rx_snr = packet.get('rxSnr')
+            rx_rssi = packet.get('rxRssi')
+
+            # Calculate hops away
+            hop_start = packet.get('hopStart')
+            hop_limit = packet.get('hopLimit')
+            hops_away = None
+            if hop_start is not None and hop_limit is not None:
+                hops_away = hop_start - hop_limit
+
+            # Try to match relay node if packet was relayed
+            relay_node_id = None
+            relay_node_name = None
+            relay_node_partial = packet.get('relayNode')
+            if relay_node_partial is not None and hops_away and hops_away > 0:
+                matched_relay = self._match_relay_node(relay_node_partial, interface, from_node_id)
+                if matched_relay:
+                    matched_id = matched_relay.get('id')
+                    if isinstance(matched_id, str) and matched_id.startswith('!'):
+                        relay_node_id = matched_id
+                        relay_node_name = matched_relay.get('name')
+
+            # Try to mark any pending telemetry request from this node as completed
+            completed = NodeTracking._db.complete_telemetry_request(
+                from_node_id=from_node_id,
+                rx_snr=rx_snr,
+                rx_rssi=rx_rssi,
+                relay_node_id=relay_node_id,
+                relay_node_name=relay_node_name,
+                hops_away=hops_away
+            )
+
+            if completed:
+                node_name = from_node_id
+                # Try to get node name from interface
+                node_info = None
+                node_num = packet.get('from')
+                if hasattr(interface, 'nodes') and interface.nodes and node_num:
+                    node_info = interface.nodes.get(node_num)
+                if node_info:
+                    user = node_info.get('user', {})
+                    node_name = user.get('longName') or user.get('shortName') or from_node_id
+
+                relay_info = f" via {relay_node_name}" if relay_node_name else ""
+                hops_info = f", {hops_away} hop(s)" if hops_away else ""
+                logger.infogreen(f"Telemetry response received from {node_name}{relay_info}{hops_info} - SNR: {rx_snr}, RSSI: {rx_rssi}")
+
+        except Exception as e:
+            logger.warn(f"Error processing telemetry response: {e}")
+
     def _export_data(self):
         """Export data to JSON"""
         try:
@@ -657,6 +736,11 @@ class NodeTracking(plugins.Base):
         NodeTracking._traceroute_in_progress = True
 
         try:
+            # Timeout any stale pending attempts (older than 2 minutes)
+            timed_out = NodeTracking._db.timeout_stale_attempts(timeout_seconds=120)
+            if timed_out > 0:
+                logger.info(f"Auto-traceroute: marked {timed_out} stale attempts as timed out")
+
             auto_tr_config = NodeTracking._config.get('auto_traceroute', {})
 
             # Get config values
@@ -704,6 +788,12 @@ class NodeTracking(plugins.Base):
                         hopLimit=hop_limit
                     )
 
+                    # Log the attempt
+                    NodeTracking._db.insert_traceroute_attempt(
+                        to_node_id=node['node_id'],
+                        to_node_name=node_name
+                    )
+
                     # Delay between traceroutes (except for the last one)
                     if i < len(nodes) - 1 and delay_seconds > 0:
                         time.sleep(delay_seconds)
@@ -720,6 +810,113 @@ class NodeTracking(plugins.Base):
         finally:
             NodeTracking._traceroute_in_progress = False
 
+    def _start_auto_telemetry(self):
+        """Start periodic auto-telemetry request timer"""
+        auto_tel_config = NodeTracking._config.get('auto_telemetry', {})
+        interval_minutes = auto_tel_config.get('interval_minutes', 15)
+
+        def run_cycle():
+            try:
+                self._perform_auto_telemetry_cycle()
+            except Exception as e:
+                logger.warn(f"Error in auto-telemetry cycle: {e}")
+
+            # Schedule next cycle if still enabled
+            if NodeTracking._config.get('enabled', True) and auto_tel_config.get('enabled', False):
+                NodeTracking._auto_telemetry_timer = threading.Timer(interval_minutes * 60, run_cycle)
+                NodeTracking._auto_telemetry_timer.daemon = True
+                NodeTracking._auto_telemetry_timer.start()
+
+        logger.infogreen(f"Auto-telemetry enabled: checking every {interval_minutes} minutes")
+
+        # Start first cycle after the interval (not immediately on connect)
+        NodeTracking._auto_telemetry_timer = threading.Timer(interval_minutes * 60, run_cycle)
+        NodeTracking._auto_telemetry_timer.daemon = True
+        NodeTracking._auto_telemetry_timer.start()
+
+    def _perform_auto_telemetry_cycle(self):
+        """Query DB for nodes needing telemetry requests and send them"""
+        if NodeTracking._telemetry_request_in_progress:
+            logger.info("Auto-telemetry: cycle already in progress, skipping")
+            return
+
+        if not NodeTracking._interface:
+            logger.warn("Auto-telemetry: no interface available")
+            return
+
+        NodeTracking._telemetry_request_in_progress = True
+
+        try:
+            # Timeout any stale pending requests (older than 2 minutes)
+            timed_out = NodeTracking._db.timeout_stale_telemetry_requests(timeout_seconds=120)
+            if timed_out > 0:
+                logger.info(f"Auto-telemetry: marked {timed_out} stale requests as timed out")
+
+            auto_tel_config = NodeTracking._config.get('auto_telemetry', {})
+            auto_tr_config = NodeTracking._config.get('auto_traceroute', {})
+
+            # Get config values
+            active_threshold = auto_tel_config.get('active_threshold_minutes', 120)
+            request_age = auto_tel_config.get('request_age_hours', 2)
+            max_per_cycle = auto_tel_config.get('max_per_cycle', 10)
+            delay_seconds = auto_tel_config.get('delay_seconds', 5)
+            exclude_mqtt = auto_tel_config.get('exclude_mqtt_nodes', True)
+            skip_recent_traceroutes = auto_tel_config.get('skip_nodes_with_recent_traceroute', True)
+            traceroute_age = auto_tr_config.get('traceroute_age_hours', 4)
+
+            # Query nodes needing telemetry requests
+            nodes = NodeTracking._db.get_nodes_needing_telemetry_request(
+                active_threshold_minutes=active_threshold,
+                request_age_hours=request_age,
+                exclude_mqtt=exclude_mqtt,
+                skip_recent_traceroutes=skip_recent_traceroutes,
+                traceroute_age_hours=traceroute_age,
+                limit=max_per_cycle
+            )
+
+            if not nodes:
+                logger.info("Auto-telemetry: no nodes need telemetry requests at this time")
+                return
+
+            logger.infogreen(f"Auto-telemetry: sending requests to {len(nodes)} nodes")
+
+            for i, node in enumerate(nodes):
+                try:
+                    node_num = node['node_num']
+                    node_id = node['node_id']
+                    node_name = node.get('long_name') or node.get('short_name') or node_id
+
+                    logger.info(f"Auto-telemetry: requesting from {node_name} ({node_id})")
+
+                    # Send telemetry request using sendTelemetry with wantResponse
+                    # This sends a request for device metrics
+                    NodeTracking._interface.sendTelemetry(
+                        destinationId=node_num,
+                        wantResponse=True
+                    )
+
+                    # Log the attempt
+                    NodeTracking._db.insert_telemetry_request(
+                        to_node_id=node_id,
+                        to_node_name=node_name
+                    )
+
+                    # Delay between requests (except for the last one)
+                    if i < len(nodes) - 1 and delay_seconds > 0:
+                        time.sleep(delay_seconds)
+
+                except Exception as e:
+                    logger.warn(f"Auto-telemetry: failed to send to {node.get('node_id')}: {e}")
+
+            logger.infogreen(f"Auto-telemetry: cycle complete, sent {len(nodes)} requests")
+
+        except Exception as e:
+            logger.warn(f"Auto-telemetry: cycle error: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            NodeTracking._telemetry_request_in_progress = False
+
     def onConnect(self, interface, client):
         """Handle connection to node"""
         if not NodeTracking._config or not NodeTracking._config.get('enabled', True):
@@ -734,6 +931,11 @@ class NodeTracking(plugins.Base):
         auto_tr_config = NodeTracking._config.get('auto_traceroute', {})
         if auto_tr_config.get('enabled', False):
             self._start_auto_traceroute()
+
+        # Start auto-telemetry if enabled
+        auto_tel_config = NodeTracking._config.get('auto_telemetry', {})
+        if auto_tel_config.get('enabled', False):
+            self._start_auto_telemetry()
 
         # Do initial export
         self._export_data()
@@ -754,6 +956,11 @@ class NodeTracking(plugins.Base):
         if NodeTracking._auto_traceroute_timer:
             NodeTracking._auto_traceroute_timer.cancel()
             NodeTracking._auto_traceroute_timer = None
+
+        # Cancel auto-telemetry timer
+        if NodeTracking._auto_telemetry_timer:
+            NodeTracking._auto_telemetry_timer.cancel()
+            NodeTracking._auto_telemetry_timer = None
 
         # Clear interface reference
         NodeTracking._interface = None

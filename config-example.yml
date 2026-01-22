@@ -81,6 +81,18 @@ node_tracking:
     delay_seconds: 10                     # Delay between sending each traceroute
     exclude_mqtt_nodes: true              # Don't traceroute MQTT-only nodes
 
+  # Automatic telemetry request configuration (for coverage testing)
+  # Simpler than traceroute - just request telemetry from nodes and track responses
+  auto_telemetry:
+    enabled: false                        # Enable automatic telemetry requests
+    interval_minutes: 15                  # How often to check and send requests
+    request_age_hours: 2                  # Send request if last successful one older than this
+    active_threshold_minutes: 120         # Node must be seen within this time to be "active"
+    max_per_cycle: 10                     # Max requests per check cycle
+    delay_seconds: 5                      # Delay between sending each request
+    exclude_mqtt_nodes: true              # Don't request from MQTT-only nodes
+    skip_nodes_with_recent_traceroute: true  # Skip nodes that have successful traceroutes
+
   # Battery monitoring alerts (optional)
   battery_alerts:
     enabled: false                        # Enable battery alerts
