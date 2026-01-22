@@ -425,12 +425,17 @@ class NodeWebServer(plugins.Base):
                 # Get all nodes
                 all_nodes = self.db.get_all_nodes()
 
-                # Filter to nodes with GPS coordinates
+                # Filter to nodes with GPS coordinates and seen within time window
                 nodes_with_gps = []
                 node_lookup = {}  # For quick lookup by node_id
 
                 for node in all_nodes:
                     if node.get('latitude') and node.get('longitude'):
+                        # Filter by time window
+                        last_seen = node.get('last_seen_utc', '')
+                        if last_seen and last_seen < time_cutoff:
+                            continue
+
                         node_data = {
                             'id': node['node_id'],
                             'name': node.get('long_name') or node.get('short_name') or node['node_id'],
@@ -457,6 +462,11 @@ class NodeWebServer(plugins.Base):
                     source_id = link['source_node_id']
                     target_id = link['neighbor_node_id']
 
+                    # Filter by time window
+                    last_heard = link.get('last_heard_utc', '')
+                    if last_heard and last_heard < time_cutoff:
+                        continue
+
                     # Only include connections where both nodes have GPS
                     if source_id in node_lookup and target_id in node_lookup:
                         connections.append({
@@ -477,6 +487,11 @@ class NodeWebServer(plugins.Base):
                 traceroute_connections = []
 
                 for trace in traceroutes:
+                    # Filter by time window
+                    trace_time = trace.get('received_at_utc', '')
+                    if trace_time and trace_time < time_cutoff:
+                        continue
+
                     route = trace.get('route', [])
                     snr_data = trace.get('snr_data') or []
 
