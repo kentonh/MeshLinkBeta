@@ -189,8 +189,8 @@ function getNodeColor(node) {
 // Get connection color based on signal quality
 function getConnectionColor(rssi, snr) {
     if (rssi === null || rssi === undefined) return '#9e9e9e';
-    if (rssi > -90 && (snr === null || snr > 5)) return '#4caf50';  // Green - good
-    if (rssi > -110 && (snr === null || snr > 0)) return '#ffc107'; // Yellow - fair
+    if (rssi > -110 && (snr === null || snr > 0)) return '#4caf50';  // Green - good
+    if (rssi > -120 && (snr === null || snr > -5)) return '#ffc107'; // Yellow - fair
     return '#f44336'; // Red - poor
 }
 
@@ -285,15 +285,17 @@ function createNodePopup(node) {
 
 // Draw a topology connection line
 function drawConnection(fromNode, toNode, conn) {
+    // Only draw direct connections (1 hop)
+    if (!conn.isDirect) return null;
+
     const color = getConnectionColor(conn.rssi, conn.snr);
-    const weight = conn.isDirect ? 3 : 2;
 
     const line = L.polyline([
         [fromNode.position.lat, fromNode.position.lon],
         [toNode.position.lat, toNode.position.lon]
     ], {
         color: color,
-        weight: weight,
+        weight: 4,
         opacity: 0.7
     }).addTo(map);
 
