@@ -512,7 +512,8 @@ class NodeDatabase:
             now = datetime.utcnow().isoformat()
             route_json = json.dumps(route_ids)
             snr_json = json.dumps(snr_data) if snr_data else None
-            hop_count = len(route_ids) - 1  # Hops = number of links between nodes
+            # hop_count = number of intermediate relay nodes (0 = direct)
+            hop_count = len(route_ids)
 
             cursor.execute("""
                 INSERT INTO traceroutes (from_node_id, to_node_id, route_json, hop_count,

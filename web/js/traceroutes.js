@@ -60,7 +60,7 @@ function displayTraceroutes(traceroutes) {
                 <td><a href="/api/traceroutes/${trace.id}" target="_blank" class="trace-link">${trace.id}</a></td>
                 <td><strong>${fromName}</strong><br><small>${trace.from_node_id}</small></td>
                 <td><strong>${toName}</strong><br><small>${trace.to_node_id || 'N/A'}</small></td>
-                <td class="center">${trace.hop_count}</td>
+                <td class="center">${trace.hop_count === 0 ? 'Direct' : trace.hop_count + ' hop' + (trace.hop_count !== 1 ? 's' : '')}</td>
                 <td class="route-path"><code>${routePath}</code></td>
                 <td class="center">${signalQuality}</td>
                 <td>${receivedTime}<br><small>${receivedDate.toLocaleString()}</small></td>
