@@ -23,8 +23,15 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeControls();
     initializeModal();
     loadStatistics();
-    loadNodes();
-    
+    loadNodes().then(() => {
+        // Check for node query parameter to auto-open details
+        const urlParams = new URLSearchParams(window.location.search);
+        const nodeId = urlParams.get('node');
+        if (nodeId) {
+            showNodeDetails(nodeId);
+        }
+    });
+
     // Auto-refresh every 30 seconds
     setInterval(() => {
         if (document.querySelector('.tab-content.active').id === 'nodes-tab') {
@@ -134,21 +141,23 @@ async function loadNodes(silent = false) {
     if (!silent) {
         document.getElementById('nodes-tbody').innerHTML = '<tr><td colspan="8" class="loading">Loading nodes...</td></tr>';
     }
-    
+
     try {
         const response = await fetch(`${API_BASE}/api/nodes`);
         const data = await response.json();
-        
+
         if (data.success) {
             allNodes = data.nodes;
             renderNodes();
+            return true;
         } else {
             throw new Error(data.error || 'Failed to load nodes');
         }
     } catch (error) {
         console.error('Failed to load nodes:', error);
-        document.getElementById('nodes-tbody').innerHTML = 
+        document.getElementById('nodes-tbody').innerHTML =
             `<tr><td colspan="8" class="loading" style="color: #dc3545;">Error loading nodes: ${error.message}</td></tr>`;
+        return false;
     }
 }
 

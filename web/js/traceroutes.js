@@ -34,8 +34,12 @@ function displayTraceroutes(traceroutes) {
         const fromName = trace.from_long_name || trace.from_short_name || trace.from_node_id;
         const toName = trace.to_long_name || trace.to_short_name || trace.to_node_id || 'Unknown';
 
-        // Format route using short names
-        const routePath = (trace.route_names || trace.route.map(id => id.slice(-4))).join(' → ');
+        // Format route using short names with links to node details
+        const routeNames = trace.route_names || trace.route.map(id => id.slice(-4));
+        const routePath = trace.route.map((nodeId, idx) => {
+            const name = routeNames[idx] || nodeId.slice(-4);
+            return `<a href="/nodes.html?node=${encodeURIComponent(nodeId)}" class="hop-link">${name}</a>`;
+        }).join(' → ');
 
         // Format SNR data if available
         let signalQuality = 'N/A';
@@ -46,13 +50,14 @@ function displayTraceroutes(traceroutes) {
             signalQuality = `Avg: ${avgSnr.toFixed(1)} dB (${minSnr.toFixed(1)} - ${maxSnr.toFixed(1)})`;
         }
 
-        // Format timestamp
-        const receivedDate = new Date(trace.received_at_utc);
+        // Format timestamp (add Z suffix if missing to ensure UTC parsing)
+        const utcString = trace.received_at_utc.endsWith('Z') ? trace.received_at_utc : trace.received_at_utc + 'Z';
+        const receivedDate = new Date(utcString);
         const receivedTime = formatRelativeTime(receivedDate);
 
         return `
             <tr>
-                <td>${trace.id}</td>
+                <td><a href="/api/traceroutes/${trace.id}" target="_blank" class="trace-link">${trace.id}</a></td>
                 <td><strong>${fromName}</strong><br><small>${trace.from_node_id}</small></td>
                 <td><strong>${toName}</strong><br><small>${trace.to_node_id || 'N/A'}</small></td>
                 <td class="center">${trace.hop_count}</td>
