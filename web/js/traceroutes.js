@@ -34,11 +34,8 @@ function displayTraceroutes(traceroutes) {
         const fromName = trace.from_long_name || trace.from_short_name || trace.from_node_id;
         const toName = trace.to_long_name || trace.to_short_name || trace.to_node_id || 'Unknown';
 
-        // Format route as short IDs with arrows
-        const routePath = trace.route.map(nodeId => {
-            // Extract last 4 chars of node ID
-            return nodeId.slice(-4);
-        }).join(' → ');
+        // Format route using short names
+        const routePath = (trace.route_names || trace.route.map(id => id.slice(-4))).join(' → ');
 
         // Format SNR data if available
         let signalQuality = 'N/A';

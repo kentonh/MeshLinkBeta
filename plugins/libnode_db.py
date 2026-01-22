@@ -547,12 +547,20 @@ class NodeDatabase:
             rows = cursor.fetchall()
             result = []
 
+            # Build a lookup of all node short names
+            cursor.execute("SELECT node_id, short_name FROM nodes")
+            node_names = {row['node_id']: row['short_name'] for row in cursor.fetchall()}
+
             for row in rows:
                 trace = dict(row)
                 # Parse JSON fields
                 trace['route'] = json.loads(trace['route_json'])
                 if trace['snr_data']:
                     trace['snr_data'] = json.loads(trace['snr_data'])
+                # Add route_names with short names for each hop
+                trace['route_names'] = [
+                    node_names.get(node_id, node_id[-4:]) for node_id in trace['route']
+                ]
                 result.append(trace)
 
             return result
