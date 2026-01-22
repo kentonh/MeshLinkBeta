@@ -19,16 +19,20 @@ document.addEventListener('DOMContentLoaded', function() {
     loadMapData();
 
     // Auto-refresh every 60 seconds
-    setInterval(() => {
-        loadMapData(true);
-    }, 60000);
+//    setInterval(() => {
+//        loadMapData(true);
+//    }, 60000);
 });
+
+// Map configuration
+const MAP_CENTER = [37.6872, -97.3301]; // Wichita, Kansas
+const MAP_ZOOM = 13; // ~5km scale
 
 // Initialize Leaflet map
 function initializeMap() {
     map = L.map('map', {
-        center: [0, 0],
-        zoom: 2,
+        center: MAP_CENTER,
+        zoom: MAP_ZOOM,
         zoomControl: true
     });
 
@@ -155,10 +159,7 @@ function renderMap() {
         nodeMarkers.push(marker);
     });
 
-    // Fit map bounds to show all nodes
-    if (nodes.length > 0) {
-        fitMapBounds(nodes);
-    }
+    // Map stays fixed on Wichita - don't auto-fit to nodes
 }
 
 // Clear all map layers
@@ -180,16 +181,16 @@ function getNodeColor(node) {
     const now = new Date();
     const ageHours = (now - lastHeard) / (1000 * 60 * 60);
 
-    if (ageHours < 1) return '#4caf50';    // Green - very recent
-    if (ageHours < 24) return '#8bc34a';   // Light green - recent
-    if (ageHours < 168) return '#ffc107';  // Yellow - this week
+    if (ageHours < 3) return '#4caf50';    // Green - very recent
+    if (ageHours < 12) return '#8bc34a';   // Light green - recent
+    if (ageHours < 24) return '#ffc107';  // Yellow - this week
     return '#f44336';                       // Red - old
 }
 
 // Get connection color based on signal quality
 function getConnectionColor(rssi, snr) {
-    if (rssi === null || rssi === undefined) return '#9e9e9e';
-    if (rssi > -110 && (snr === null || snr > 0)) return '#4caf50';  // Green - good
+    if (rssi === null || rssi === undefined) return '#1a1919';
+    if (rssi > -110 && (snr === null || snr > 0)) return '#09af0f';  // Green - good
     if (rssi > -120 && (snr === null || snr > -5)) return '#ffc107'; // Yellow - fair
     return '#f44336'; // Red - poor
 }
@@ -197,7 +198,7 @@ function getConnectionColor(rssi, snr) {
 // Get marker radius based on battery level
 function getNodeRadius(battery) {
     if (!battery) return 8;
-    return 5 + (battery / 100) * 10; // 5-15px based on battery
+    return 5 + (battery / 100); // 5-15px based on battery
 }
 
 // Create a node marker
@@ -295,8 +296,8 @@ function drawConnection(fromNode, toNode, conn) {
         [toNode.position.lat, toNode.position.lon]
     ], {
         color: color,
-        weight: 4,
-        opacity: 0.7
+        weight: 14,
+        opacity: 0.9
     }).addTo(map);
 
     // Add popup with connection info
