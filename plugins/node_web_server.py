@@ -82,6 +82,15 @@ class NodeWebServer(plugins.Base):
             try:
                 return send_from_directory(web_dir, 'map.html')
             except Exception as e:
+                logger.warn(f"Error serving map.html: {e}")
+                return "Map page not found", 404
+
+        @self.app.route('/map3.html')
+        def map3_page():
+            """Serve coverage map page"""
+            try:
+                return send_from_directory(web_dir, 'map3.html')
+            except Exception as e:
                 logger.warn(f"Failed to serve map.html: {e}")
                 return "<h1>Network Map</h1><p>Map interface not yet available.</p>"
         
@@ -537,6 +546,221 @@ class NodeWebServer(plugins.Base):
 
             except Exception as e:
                 logger.warn(f"Error getting map data: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+
+        @self.app.route('/api/map3-data', methods=['GET'])
+        def get_map3_data():
+            """Get connection data for coverage map (map3) based on connection-logic.md specs"""
+            try:
+                from datetime import datetime, timedelta
+
+                # Get time window from query params (default 24 hours)
+                hours = int(request.args.get('hours', 24))
+                time_cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+
+                # Get all nodes with GPS
+                all_nodes = self.db.get_all_nodes()
+                nodes_with_gps = []
+                node_lookup = {}
+
+                for node in all_nodes:
+                    if node.get('latitude') and node.get('longitude'):
+                        last_seen = node.get('last_seen_utc', '')
+                        if last_seen and last_seen < time_cutoff:
+                            continue
+
+                        node_data = {
+                            'id': node['node_id'],
+                            'name': node.get('long_name') or node.get('short_name') or node['node_id'],
+                            'shortName': node.get('short_name') or node['node_id'][-4:],
+                            'position': {
+                                'lat': node['latitude'],
+                                'lon': node['longitude'],
+                                'alt': node.get('altitude')
+                            },
+                            'battery': node.get('battery_level'),
+                            'hwModel': node.get('hardware_model'),
+                            'lastHeard': node.get('last_seen_utc'),
+                            'totalPackets': node.get('total_packets_received', 0),
+                            'isMqtt': node.get('is_mqtt', False),
+                            'directLinkCount': 0
+                        }
+                        nodes_with_gps.append(node_data)
+                        node_lookup[node['node_id']] = node_data
+
+                # Track direct connections (deduplicated)
+                # Key: tuple(sorted([node1, node2])) -> connection data
+                direct_connections_map = {}
+
+                # Track indirect coverage per source node
+                # Key: source_node_id -> set of relay_node_ids
+                indirect_coverage_map = {}
+
+                # Get my node ID for local node reference
+                my_node_id = None
+                conn = self.db._get_connection()
+                cursor = conn.cursor()
+
+                # Source 1: Packets with relay node data
+                # Direct connection if hops_away < 2 (relay -> local node)
+                # Indirect connection if hops_away >= 2 (source -> relay is indirect)
+                cursor.execute("""
+                    SELECT DISTINCT
+                        node_id, relay_node_id, relay_node_name,
+                        hops_away, rx_snr, rx_rssi, received_at_utc
+                    FROM packet_history
+                    WHERE relay_node_id IS NOT NULL
+                      AND relay_node_id LIKE '!%'
+                      AND received_at_utc >= ?
+                    ORDER BY received_at_utc DESC
+                """, (time_cutoff,))
+
+                for row in cursor.fetchall():
+                    source_id = row['node_id']
+                    relay_id = row['relay_node_id']
+                    hops_away = row['hops_away'] or 0
+
+                    if hops_away < 2:
+                        # Direct connection: relay_node -> local_node (we received via this relay)
+                        # This means relay can hear source directly
+                        if relay_id in node_lookup:
+                            # We don't know local node ID here, but we know relay heard source
+                            # Actually per spec: "there is a direct connection" from relay to local
+                            # For map purposes, we'll track relay <-> source as a link
+                            key = tuple(sorted([source_id, relay_id]))
+                            if key not in direct_connections_map and source_id in node_lookup:
+                                direct_connections_map[key] = {
+                                    'from': source_id,
+                                    'to': relay_id,
+                                    'rssi': row['rx_rssi'],
+                                    'snr': row['rx_snr'],
+                                    'source': 'relay-packet',
+                                    'packetCount': 1
+                                }
+                            elif key in direct_connections_map:
+                                direct_connections_map[key]['packetCount'] += 1
+                    else:
+                        # Indirect connection: source -> relay is indirect (2+ hops)
+                        if source_id in node_lookup and relay_id in node_lookup:
+                            if source_id not in indirect_coverage_map:
+                                indirect_coverage_map[source_id] = set()
+                            indirect_coverage_map[source_id].add(relay_id)
+
+                # Source 2: Traceroute data (both out and back paths show direct links)
+                traceroutes = self.db.get_all_traceroutes(limit=200)
+                for trace in traceroutes:
+                    trace_time = trace.get('received_at_utc', '')
+                    if trace_time and trace_time < time_cutoff:
+                        continue
+
+                    route = trace.get('route', [])
+                    snr_data = trace.get('snr_data') or []
+
+                    # Each consecutive pair in route is a direct link
+                    for i in range(len(route) - 1):
+                        from_id = route[i]
+                        to_id = route[i + 1]
+
+                        if from_id in node_lookup and to_id in node_lookup:
+                            key = tuple(sorted([from_id, to_id]))
+                            snr = snr_data[i] if i < len(snr_data) else None
+
+                            if key not in direct_connections_map:
+                                direct_connections_map[key] = {
+                                    'from': from_id,
+                                    'to': to_id,
+                                    'rssi': None,
+                                    'snr': snr,
+                                    'source': 'traceroute',
+                                    'packetCount': 1
+                                }
+                            else:
+                                # Update with traceroute SNR if we don't have signal data
+                                if direct_connections_map[key]['snr'] is None and snr is not None:
+                                    direct_connections_map[key]['snr'] = snr
+                                if direct_connections_map[key]['source'] == 'relay-packet':
+                                    direct_connections_map[key]['source'] = 'relay+traceroute'
+                                direct_connections_map[key]['packetCount'] += 1
+
+                # Source 3: Telemetry responses with relay data (hop count < 2)
+                cursor.execute("""
+                    SELECT to_node_id, relay_node_id, relay_node_name,
+                           hops_away, rx_snr, rx_rssi, completed_at_utc
+                    FROM telemetry_requests
+                    WHERE status = 'completed'
+                      AND relay_node_id IS NOT NULL
+                      AND relay_node_id LIKE '!%'
+                      AND completed_at_utc >= ?
+                """, (time_cutoff,))
+
+                for row in cursor.fetchall():
+                    source_id = row['to_node_id']  # The node that responded
+                    relay_id = row['relay_node_id']
+                    hops_away = row['hops_away'] or 0
+
+                    if hops_away < 2:
+                        # Direct connection between source and relay
+                        if source_id in node_lookup and relay_id in node_lookup:
+                            key = tuple(sorted([source_id, relay_id]))
+                            if key not in direct_connections_map:
+                                direct_connections_map[key] = {
+                                    'from': source_id,
+                                    'to': relay_id,
+                                    'rssi': row['rx_rssi'],
+                                    'snr': row['rx_snr'],
+                                    'source': 'telemetry',
+                                    'packetCount': 1
+                                }
+                            else:
+                                direct_connections_map[key]['packetCount'] += 1
+                    else:
+                        # Indirect connection
+                        if source_id in node_lookup and relay_id in node_lookup:
+                            if source_id not in indirect_coverage_map:
+                                indirect_coverage_map[source_id] = set()
+                            indirect_coverage_map[source_id].add(relay_id)
+
+                # Convert to lists for JSON response
+                direct_connections = list(direct_connections_map.values())
+
+                # Update direct link counts on nodes
+                for conn in direct_connections:
+                    if conn['from'] in node_lookup:
+                        node_lookup[conn['from']]['directLinkCount'] += 1
+                    if conn['to'] in node_lookup:
+                        node_lookup[conn['to']]['directLinkCount'] += 1
+
+                # Convert indirect coverage map to list
+                indirect_coverage = []
+                for source_id, relay_ids in indirect_coverage_map.items():
+                    if len(relay_ids) > 0:
+                        indirect_coverage.append({
+                            'sourceNodeId': source_id,
+                            'relayNodeIds': list(relay_ids)
+                        })
+
+                # Stats
+                stats = {
+                    'totalNodes': len(nodes_with_gps),
+                    'directConnections': len(direct_connections),
+                    'indirectCoverage': len(indirect_coverage)
+                }
+
+                return jsonify({
+                    'success': True,
+                    'nodes': nodes_with_gps,
+                    'directConnections': direct_connections,
+                    'indirectCoverage': indirect_coverage,
+                    'stats': stats
+                })
+
+            except Exception as e:
+                logger.warn(f"Error getting map3 data: {e}")
                 import traceback
                 traceback.print_exc()
                 return jsonify({
