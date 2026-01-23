@@ -317,7 +317,7 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
             radius: radius,
             color: 'rgba(102, 126, 234, 0.5)',
             fillColor: 'rgba(102, 126, 234, 0.15)',
-            fillOpacity: 0.2,
+            fillOpacity: 0.4,
             weight: 2,
             dashArray: '5, 10'
         }).addTo(map);
@@ -361,7 +361,7 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
         const polygon = L.polygon(sortedPoints, {
             color: 'rgba(156, 39, 176, 0.5)',
             fillColor: 'rgba(156, 39, 176, 0.15)',
-            fillOpacity: 0.2,
+            fillOpacity: 0.6,
             weight: 2,
             dashArray: '5, 10'
         }).addTo(map);
