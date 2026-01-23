@@ -10,7 +10,12 @@ let nodeMarkers = [];
 let directConnectionLines = [];
 let indirectCoverageShapes = [];
 let selectedNode = null;
+let selectedShape = null;
 let timeWindow = 24;
+
+// Opacity settings
+const DEFAULT_OPACITY = 0.2;
+const SELECTED_OPACITY = 0.7;
 
 // Map configuration
 const MAP_CENTER = [37.6872, -97.3301]; // Wichita, Kansas
@@ -37,6 +42,7 @@ function initializeMap() {
     }).addTo(map);
 
     map.on('click', function() {
+        deselectAllShapes();
         closeDetailsPanel();
     });
 }
@@ -155,6 +161,25 @@ function clearMapLayers() {
     nodeMarkers = [];
     directConnectionLines = [];
     indirectCoverageShapes = [];
+    selectedShape = null;
+}
+
+// Deselect all shapes and lines
+function deselectAllShapes() {
+    // Reset all direct connection lines to default opacity
+    directConnectionLines.forEach(line => {
+        line.setStyle({ opacity: DEFAULT_OPACITY });
+    });
+
+    // Reset all indirect coverage shapes to default opacity
+    indirectCoverageShapes.forEach(shape => {
+        shape.setStyle({
+            opacity: DEFAULT_OPACITY,
+            fillOpacity: DEFAULT_OPACITY
+        });
+    });
+
+    selectedShape = null;
 }
 
 // Get node color based on last heard time
@@ -257,8 +282,16 @@ function drawDirectConnection(fromNode, toNode, conn) {
     ], {
         color: color,
         weight: 6,
-        opacity: 0.8
+        opacity: DEFAULT_OPACITY
     }).addTo(map);
+
+    // Click handler to highlight
+    line.on('click', function(e) {
+        L.DomEvent.stopPropagation(e);
+        deselectAllShapes();
+        line.setStyle({ opacity: SELECTED_OPACITY });
+        selectedShape = line;
+    });
 
     // Popup with connection info
     const rssiStr = conn.rssi !== null ? `${conn.rssi.toFixed(1)} dBm` : 'N/A';
@@ -292,9 +325,9 @@ function drawDirectConnection(fromNode, toNode, conn) {
     return line;
 }
 
-// Draw indirect coverage shape
+// Draw indirect coverage shape (ellipse)
 // relayNode is the CENTER of the shape
-// sendingNodes define the EDGES (the nodes that sent packets through this relay)
+// sendingNodes define the boundary (up to 4 farthest nodes)
 function drawIndirectCoverage(relayNode, coverage, nodeById) {
     const sendingNodes = coverage.sendingNodeIds
         .map(id => nodeById[id])
@@ -305,94 +338,128 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
     const relayLat = relayNode.position.lat;
     const relayLon = relayNode.position.lon;
 
-    if (sendingNodes.length === 1) {
-        // Single sending node - draw circle centered on relay
-        const sendingNode = sendingNodes[0];
-        const radius = calculateDistance(
-            relayLat, relayLon,
-            sendingNode.position.lat, sendingNode.position.lon
-        );
+    // Calculate distances from relay to each sending node
+    const nodesWithDistance = sendingNodes.map(node => ({
+        node: node,
+        distance: calculateDistance(relayLat, relayLon, node.position.lat, node.position.lon)
+    }));
 
-        const circle = L.circle([relayLat, relayLon], {
-            radius: radius,
-            color: 'rgba(102, 126, 234, 0.5)',
-            fillColor: 'rgba(102, 126, 234, 0.15)',
-            fillOpacity: 0.4,
-            weight: 2,
-            dashArray: '5, 10'
-        }).addTo(map);
+    // Sort by distance (farthest first) and take up to 4
+    nodesWithDistance.sort((a, b) => b.distance - a.distance);
+    const farthestNodes = nodesWithDistance.slice(0, 4);
 
-        circle.bindPopup(`
-            <div class="popup-content">
-                <div class="popup-title">Indirect Coverage: ${escapeHtml(relayNode.shortName)}</div>
-                <div class="popup-details">
-                    <div class="popup-row">
-                        <span class="popup-label">Relay Node:</span>
-                        <span>${escapeHtml(relayNode.shortName)}</span>
-                    </div>
-                    <div class="popup-row">
-                        <span class="popup-label">Reaches:</span>
-                        <span>${escapeHtml(sendingNode.shortName)}</span>
-                    </div>
-                    <div class="popup-row">
-                        <span class="popup-label">Est. Range:</span>
-                        <span>${(radius / 1000).toFixed(2)} km</span>
-                    </div>
-                    <div class="popup-row">
-                        <span class="popup-label">Hop Count:</span>
-                        <span>2+</span>
-                    </div>
-                </div>
-            </div>
-        `);
+    // Create ellipse based on farthest nodes
+    const ellipse = createEllipse(relayLat, relayLon, farthestNodes);
 
-        return circle;
-    } else {
-        // Multiple sending nodes - draw polygon with edges at sending node locations
-        const points = sendingNodes.map(node => [node.position.lat, node.position.lon]);
+    const shape = L.polygon(ellipse.points, {
+        color: 'rgba(102, 126, 234, 0.8)',
+        fillColor: 'rgba(102, 126, 234, 0.4)',
+        opacity: DEFAULT_OPACITY,
+        fillOpacity: DEFAULT_OPACITY,
+        weight: 2,
+        dashArray: '5, 10'
+    }).addTo(map);
 
-        // Sort points by angle from relay node to create proper polygon
-        const sortedPoints = points.sort((a, b) => {
-            const angleA = Math.atan2(a[0] - relayLat, a[1] - relayLon);
-            const angleB = Math.atan2(b[0] - relayLat, b[1] - relayLon);
-            return angleA - angleB;
+    // Click handler to highlight
+    shape.on('click', function(e) {
+        L.DomEvent.stopPropagation(e);
+        deselectAllShapes();
+        shape.setStyle({
+            opacity: SELECTED_OPACITY,
+            fillOpacity: SELECTED_OPACITY
         });
+        selectedShape = shape;
+    });
 
-        const polygon = L.polygon(sortedPoints, {
-            color: 'rgba(156, 39, 176, 0.5)',
-            fillColor: 'rgba(156, 39, 176, 0.15)',
-            fillOpacity: 0.6,
-            weight: 2,
-            dashArray: '5, 10'
-        }).addTo(map);
+    const farthestNames = farthestNodes.map(n => n.node.shortName).join(', ');
 
-        const sendingNames = sendingNodes.map(n => n.shortName).join(', ');
-        polygon.bindPopup(`
-            <div class="popup-content">
-                <div class="popup-title">Indirect Coverage: ${escapeHtml(relayNode.shortName)}</div>
-                <div class="popup-details">
-                    <div class="popup-row">
-                        <span class="popup-label">Relay Node:</span>
-                        <span>${escapeHtml(relayNode.shortName)}</span>
-                    </div>
-                    <div class="popup-row">
-                        <span class="popup-label">Reaches:</span>
-                        <span>${escapeHtml(sendingNames)}</span>
-                    </div>
-                    <div class="popup-row">
-                        <span class="popup-label">Node Count:</span>
-                        <span>${sendingNodes.length}</span>
-                    </div>
-                    <div class="popup-row">
-                        <span class="popup-label">Hop Count:</span>
-                        <span>2+</span>
-                    </div>
+    shape.bindPopup(`
+        <div class="popup-content">
+            <div class="popup-title">Indirect Coverage: ${escapeHtml(relayNode.shortName)}</div>
+            <div class="popup-details">
+                <div class="popup-row">
+                    <span class="popup-label">Relay Node:</span>
+                    <span>${escapeHtml(relayNode.shortName)}</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">Total Nodes Reached:</span>
+                    <span>${sendingNodes.length}</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">Farthest Nodes:</span>
+                    <span>${escapeHtml(farthestNames)}</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">Max Range:</span>
+                    <span>${(ellipse.semiMajor / 1000).toFixed(2)} km</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">Hop Count:</span>
+                    <span>2+</span>
                 </div>
             </div>
-        `);
+        </div>
+    `);
 
-        return polygon;
+    return shape;
+}
+
+// Create ellipse points from center and farthest nodes
+function createEllipse(centerLat, centerLon, farthestNodes) {
+    if (farthestNodes.length === 0) {
+        return { points: [], semiMajor: 0, semiMinor: 0 };
     }
+
+    // Calculate semi-major axis (farthest distance)
+    const semiMajor = farthestNodes[0].distance;
+
+    // Calculate semi-minor axis
+    let semiMinor;
+    if (farthestNodes.length === 1) {
+        // Single node: make a circle
+        semiMinor = semiMajor;
+    } else if (farthestNodes.length === 2) {
+        // Two nodes: semi-minor is the shorter distance, or 70% of major if both similar
+        semiMinor = Math.min(farthestNodes[1].distance, semiMajor * 0.7);
+    } else {
+        // 3-4 nodes: use average of non-primary nodes for semi-minor
+        const otherDistances = farthestNodes.slice(1).map(n => n.distance);
+        semiMinor = otherDistances.reduce((a, b) => a + b, 0) / otherDistances.length;
+    }
+
+    // Ensure semi-minor is at least 50% of semi-major for reasonable ellipse shape
+    semiMinor = Math.max(semiMinor, semiMajor * 0.5);
+
+    // Calculate rotation angle based on farthest node direction
+    const farthestNode = farthestNodes[0].node;
+    const rotation = Math.atan2(
+        farthestNode.position.lat - centerLat,
+        farthestNode.position.lon - centerLon
+    );
+
+    // Generate ellipse points (polygon approximation)
+    const numPoints = 64;
+    const points = [];
+
+    for (let i = 0; i < numPoints; i++) {
+        const angle = (2 * Math.PI * i) / numPoints;
+
+        // Ellipse parametric equations
+        const x = semiMajor * Math.cos(angle);
+        const y = semiMinor * Math.sin(angle);
+
+        // Rotate by the calculated angle
+        const rotatedX = x * Math.cos(rotation) - y * Math.sin(rotation);
+        const rotatedY = x * Math.sin(rotation) + y * Math.cos(rotation);
+
+        // Convert meters to lat/lon offset (approximate)
+        const latOffset = rotatedY / 111320; // meters to degrees latitude
+        const lonOffset = rotatedX / (111320 * Math.cos(centerLat * Math.PI / 180)); // meters to degrees longitude
+
+        points.push([centerLat + latOffset, centerLon + lonOffset]);
+    }
+
+    return { points, semiMajor, semiMinor };
 }
 
 // Calculate distance between two points in meters (Haversine formula)
@@ -410,6 +477,9 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 // Show node details in side panel
 function showNodeDetails(node) {
     selectedNode = node;
+
+    // Highlight related shapes
+    highlightNodeShapes(node.id);
 
     const panel = document.getElementById('details-panel');
     const title = document.getElementById('details-title');
@@ -475,9 +545,9 @@ function showNodeDetails(node) {
             </div>
             ` : ''}
             <div class="detail-row">
-                <a href="https://www.google.com/maps/search/?api=1&query=${node.position.lat},${node.position.lon}"
+                <a href="https://www.openstreetmap.org/?mlat=${node.position.lat}&mlon=${node.position.lon}&zoom=15"
                    target="_blank" class="detail-link">
-                    Open in Google Maps
+                    Open in OpenStreetMap
                 </a>
             </div>
         </div>
@@ -534,6 +604,36 @@ function showNodeDetails(node) {
     `;
 
     panel.classList.add('open');
+}
+
+// Highlight shapes related to a node
+function highlightNodeShapes(nodeId) {
+    deselectAllShapes();
+
+    // Highlight direct connections involving this node
+    if (mapData && mapData.directConnections) {
+        mapData.directConnections.forEach((conn, index) => {
+            if (conn.from === nodeId || conn.to === nodeId) {
+                if (directConnectionLines[index]) {
+                    directConnectionLines[index].setStyle({ opacity: SELECTED_OPACITY });
+                }
+            }
+        });
+    }
+
+    // Highlight indirect coverage shapes for this node (as relay or sending)
+    if (mapData && mapData.indirectCoverage) {
+        mapData.indirectCoverage.forEach((coverage, index) => {
+            if (coverage.relayNodeId === nodeId || coverage.sendingNodeIds.includes(nodeId)) {
+                if (indirectCoverageShapes[index]) {
+                    indirectCoverageShapes[index].setStyle({
+                        opacity: SELECTED_OPACITY,
+                        fillOpacity: SELECTED_OPACITY
+                    });
+                }
+            }
+        });
+    }
 }
 
 // Get direct connections for a node
@@ -599,6 +699,7 @@ function closeDetailsPanel() {
     const panel = document.getElementById('details-panel');
     panel.classList.remove('open');
     selectedNode = null;
+    deselectAllShapes();
 }
 
 // Get battery color
