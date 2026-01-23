@@ -597,8 +597,9 @@ class NodeWebServer(plugins.Base):
                 # Key: tuple(sorted([node1, node2])) -> connection data
                 direct_connections_map = {}
 
-                # Track indirect coverage per source node
-                # Key: source_node_id -> set of relay_node_ids
+                # Track indirect coverage per RELAY node
+                # Key: relay_node_id -> set of sending_node_ids
+                # The relay node is the center, sending nodes define the edges
                 indirect_coverage_map = {}
 
                 # Get my node ID for local node reference
@@ -645,11 +646,12 @@ class NodeWebServer(plugins.Base):
                             elif key in direct_connections_map:
                                 direct_connections_map[key]['packetCount'] += 1
                     else:
-                        # Indirect connection: source -> relay is indirect (2+ hops)
+                        # Indirect connection: relay can reach source indirectly (2+ hops)
+                        # Center shape on RELAY, edge defined by SENDING node
                         if source_id in node_lookup and relay_id in node_lookup:
-                            if source_id not in indirect_coverage_map:
-                                indirect_coverage_map[source_id] = set()
-                            indirect_coverage_map[source_id].add(relay_id)
+                            if relay_id not in indirect_coverage_map:
+                                indirect_coverage_map[relay_id] = set()
+                            indirect_coverage_map[relay_id].add(source_id)
 
                 # Source 2: Traceroute data (both out and back paths show direct links)
                 traceroutes = self.db.get_all_traceroutes(limit=200)
@@ -719,11 +721,12 @@ class NodeWebServer(plugins.Base):
                             else:
                                 direct_connections_map[key]['packetCount'] += 1
                     else:
-                        # Indirect connection
+                        # Indirect connection: relay can reach source indirectly (2+ hops)
+                        # Center shape on RELAY, edge defined by SENDING node
                         if source_id in node_lookup and relay_id in node_lookup:
-                            if source_id not in indirect_coverage_map:
-                                indirect_coverage_map[source_id] = set()
-                            indirect_coverage_map[source_id].add(relay_id)
+                            if relay_id not in indirect_coverage_map:
+                                indirect_coverage_map[relay_id] = set()
+                            indirect_coverage_map[relay_id].add(source_id)
 
                 # Convert to lists for JSON response
                 direct_connections = list(direct_connections_map.values())
@@ -736,12 +739,13 @@ class NodeWebServer(plugins.Base):
                         node_lookup[conn['to']]['directLinkCount'] += 1
 
                 # Convert indirect coverage map to list
+                # Each entry: relay node (center) with list of sending nodes (edges)
                 indirect_coverage = []
-                for source_id, relay_ids in indirect_coverage_map.items():
-                    if len(relay_ids) > 0:
+                for relay_id, sending_ids in indirect_coverage_map.items():
+                    if len(sending_ids) > 0:
                         indirect_coverage.append({
-                            'sourceNodeId': source_id,
-                            'relayNodeIds': list(relay_ids)
+                            'relayNodeId': relay_id,
+                            'sendingNodeIds': list(sending_ids)
                         })
 
                 # Stats

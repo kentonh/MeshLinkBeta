@@ -115,10 +115,11 @@ function renderMap() {
     });
 
     // Draw indirect coverage shapes first (under everything)
+    // Shape centered on RELAY node, edges defined by SENDING nodes
     indirectCoverage.forEach(coverage => {
-        const sourceNode = nodeById[coverage.sourceNodeId];
-        if (sourceNode) {
-            const shape = drawIndirectCoverage(sourceNode, coverage, nodeById);
+        const relayNode = nodeById[coverage.relayNodeId];
+        if (relayNode) {
+            const shape = drawIndirectCoverage(relayNode, coverage, nodeById);
             if (shape) {
                 indirectCoverageShapes.push(shape);
             }
@@ -292,25 +293,27 @@ function drawDirectConnection(fromNode, toNode, conn) {
 }
 
 // Draw indirect coverage shape
-function drawIndirectCoverage(sourceNode, coverage, nodeById) {
-    const relayNodes = coverage.relayNodeIds
+// relayNode is the CENTER of the shape
+// sendingNodes define the EDGES (the nodes that sent packets through this relay)
+function drawIndirectCoverage(relayNode, coverage, nodeById) {
+    const sendingNodes = coverage.sendingNodeIds
         .map(id => nodeById[id])
         .filter(n => n && n.position);
 
-    if (relayNodes.length === 0) return null;
+    if (sendingNodes.length === 0) return null;
 
-    const sourceLat = sourceNode.position.lat;
-    const sourceLon = sourceNode.position.lon;
+    const relayLat = relayNode.position.lat;
+    const relayLon = relayNode.position.lon;
 
-    if (relayNodes.length === 1) {
-        // Single relay - draw circle
-        const relayNode = relayNodes[0];
+    if (sendingNodes.length === 1) {
+        // Single sending node - draw circle centered on relay
+        const sendingNode = sendingNodes[0];
         const radius = calculateDistance(
-            sourceLat, sourceLon,
-            relayNode.position.lat, relayNode.position.lon
+            relayLat, relayLon,
+            sendingNode.position.lat, sendingNode.position.lon
         );
 
-        const circle = L.circle([sourceLat, sourceLon], {
+        const circle = L.circle([relayLat, relayLon], {
             radius: radius,
             color: 'rgba(102, 126, 234, 0.5)',
             fillColor: 'rgba(102, 126, 234, 0.15)',
@@ -321,11 +324,15 @@ function drawIndirectCoverage(sourceNode, coverage, nodeById) {
 
         circle.bindPopup(`
             <div class="popup-content">
-                <div class="popup-title">Indirect Coverage: ${escapeHtml(sourceNode.shortName)}</div>
+                <div class="popup-title">Indirect Coverage: ${escapeHtml(relayNode.shortName)}</div>
                 <div class="popup-details">
                     <div class="popup-row">
-                        <span class="popup-label">Relay via:</span>
+                        <span class="popup-label">Relay Node:</span>
                         <span>${escapeHtml(relayNode.shortName)}</span>
+                    </div>
+                    <div class="popup-row">
+                        <span class="popup-label">Reaches:</span>
+                        <span>${escapeHtml(sendingNode.shortName)}</span>
                     </div>
                     <div class="popup-row">
                         <span class="popup-label">Est. Range:</span>
@@ -341,14 +348,13 @@ function drawIndirectCoverage(sourceNode, coverage, nodeById) {
 
         return circle;
     } else {
-        // Multiple relays - draw polygon connecting them
-        // Create convex hull-like shape centered on source with relay nodes defining edges
-        const points = relayNodes.map(relay => [relay.position.lat, relay.position.lon]);
+        // Multiple sending nodes - draw polygon with edges at sending node locations
+        const points = sendingNodes.map(node => [node.position.lat, node.position.lon]);
 
-        // Sort points by angle from source to create proper polygon
+        // Sort points by angle from relay node to create proper polygon
         const sortedPoints = points.sort((a, b) => {
-            const angleA = Math.atan2(a[0] - sourceLat, a[1] - sourceLon);
-            const angleB = Math.atan2(b[0] - sourceLat, b[1] - sourceLon);
+            const angleA = Math.atan2(a[0] - relayLat, a[1] - relayLon);
+            const angleB = Math.atan2(b[0] - relayLat, b[1] - relayLon);
             return angleA - angleB;
         });
 
@@ -360,18 +366,22 @@ function drawIndirectCoverage(sourceNode, coverage, nodeById) {
             dashArray: '5, 10'
         }).addTo(map);
 
-        const relayNames = relayNodes.map(r => r.shortName).join(', ');
+        const sendingNames = sendingNodes.map(n => n.shortName).join(', ');
         polygon.bindPopup(`
             <div class="popup-content">
-                <div class="popup-title">Indirect Coverage: ${escapeHtml(sourceNode.shortName)}</div>
+                <div class="popup-title">Indirect Coverage: ${escapeHtml(relayNode.shortName)}</div>
                 <div class="popup-details">
                     <div class="popup-row">
-                        <span class="popup-label">Relays via:</span>
-                        <span>${escapeHtml(relayNames)}</span>
+                        <span class="popup-label">Relay Node:</span>
+                        <span>${escapeHtml(relayNode.shortName)}</span>
                     </div>
                     <div class="popup-row">
-                        <span class="popup-label">Relay Count:</span>
-                        <span>${relayNodes.length}</span>
+                        <span class="popup-label">Reaches:</span>
+                        <span>${escapeHtml(sendingNames)}</span>
+                    </div>
+                    <div class="popup-row">
+                        <span class="popup-label">Node Count:</span>
+                        <span>${sendingNodes.length}</span>
                     </div>
                     <div class="popup-row">
                         <span class="popup-label">Hop Count:</span>
@@ -488,14 +498,33 @@ function showNodeDetails(node) {
         ${indirectInfo ? `
         <div class="detail-section">
             <h4>Indirect Coverage</h4>
+            ${indirectInfo.role === 'relay' ? `
             <div class="detail-row">
-                <span class="detail-label">Relay Nodes:</span>
-                <span class="detail-value">${indirectInfo.relayCount}</span>
+                <span class="detail-label">Role:</span>
+                <span class="detail-value">Relay Node</span>
             </div>
             <div class="detail-row">
-                <span class="detail-label">Via:</span>
-                <span class="detail-value">${escapeHtml(indirectInfo.relayNames)}</span>
+                <span class="detail-label">Reaches (2+ hops):</span>
+                <span class="detail-value">${indirectInfo.nodeCount} nodes</span>
             </div>
+            <div class="detail-row">
+                <span class="detail-label">Nodes:</span>
+                <span class="detail-value">${escapeHtml(indirectInfo.nodeNames)}</span>
+            </div>
+            ` : `
+            <div class="detail-row">
+                <span class="detail-label">Role:</span>
+                <span class="detail-value">Reached via relay</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Through:</span>
+                <span class="detail-value">${indirectInfo.nodeCount} relay(s)</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Relays:</span>
+                <span class="detail-value">${escapeHtml(indirectInfo.nodeNames)}</span>
+            </div>
+            `}
         </div>
         ` : ''}
 
@@ -528,22 +557,41 @@ function getNodeDirectConnections(nodeId) {
     });
 }
 
-// Get indirect coverage info for a node
+// Get indirect coverage info for a node (if it's a relay node)
 function getNodeIndirectCoverage(nodeId) {
     if (!mapData || !mapData.indirectCoverage) return null;
 
-    const coverage = mapData.indirectCoverage.find(c => c.sourceNodeId === nodeId);
-    if (!coverage) return null;
+    // Check if this node is a relay for indirect connections
+    const asRelay = mapData.indirectCoverage.find(c => c.relayNodeId === nodeId);
+    if (asRelay) {
+        const sendingNames = asRelay.sendingNodeIds.map(id => {
+            const node = mapData.nodes.find(n => n.id === id);
+            return node ? node.shortName : id.slice(-4);
+        }).join(', ');
 
-    const relayNames = coverage.relayNodeIds.map(id => {
-        const node = mapData.nodes.find(n => n.id === id);
-        return node ? node.shortName : id.slice(-4);
-    }).join(', ');
+        return {
+            role: 'relay',
+            nodeCount: asRelay.sendingNodeIds.length,
+            nodeNames: sendingNames
+        };
+    }
 
-    return {
-        relayCount: coverage.relayNodeIds.length,
-        relayNames: relayNames
-    };
+    // Check if this node is reached indirectly through relays
+    const asSource = mapData.indirectCoverage.filter(c => c.sendingNodeIds.includes(nodeId));
+    if (asSource.length > 0) {
+        const relayNames = asSource.map(c => {
+            const node = mapData.nodes.find(n => n.id === c.relayNodeId);
+            return node ? node.shortName : c.relayNodeId.slice(-4);
+        }).join(', ');
+
+        return {
+            role: 'sending',
+            nodeCount: asSource.length,
+            nodeNames: relayNames
+        };
+    }
+
+    return null;
 }
 
 // Close details panel
