@@ -413,26 +413,75 @@ async function showNodeDetails(nodeId) {
                     <span class="detail-value">${node.is_mqtt ? 'Yes' : 'No'}</span>
                 </div>
                 ${(() => {
-                    // Find most recent packet with relay info
+                    // Collect all unique relay nodes from packets
+                    const relayNodes = new Map(); // Map of relay_node_id -> { name, lastSeen, hops }
+
                     if (packetsData.success && packetsData.packets.length > 0) {
-                        const recentPacket = packetsData.packets[0];
-                        if (recentPacket.relay_node_id && recentPacket.relay_node_name) {
+                        packetsData.packets.forEach(pkt => {
+                            if (pkt.relay_node_id && pkt.relay_node_name && pkt.relay_node_id.startsWith('!')) {
+                                // Only add/update if this is a newer sighting or first sighting
+                                if (!relayNodes.has(pkt.relay_node_id)) {
+                                    relayNodes.set(pkt.relay_node_id, {
+                                        id: pkt.relay_node_id,
+                                        name: pkt.relay_node_name,
+                                        hops: pkt.hops_away,
+                                        lastPacketTime: pkt.received_at_utc
+                                    });
+                                }
+                            }
+                        });
+
+                        // Look up each relay node's status from allNodes
+                        const activeRelays = [];
+                        relayNodes.forEach((relay, relayId) => {
+                            const relayNode = allNodes.find(n => n.node_id === relayId);
+                            if (relayNode && relayNode.last_seen_utc) {
+                                const utcString = relayNode.last_seen_utc.endsWith('Z') ? relayNode.last_seen_utc : relayNode.last_seen_utc + 'Z';
+                                const lastSeen = new Date(utcString);
+                                const now = new Date();
+                                const minutesAgo = (now - lastSeen) / 1000 / 60;
+
+                                // Include Online (<3 hours) and Recent (<6 hours)
+                                if (minutesAgo < 360) {
+                                    const status = minutesAgo < 180 ? 'online' : 'recent';
+                                    activeRelays.push({
+                                        ...relay,
+                                        status: status,
+                                        minutesAgo: minutesAgo
+                                    });
+                                }
+                            }
+                        });
+
+                        // Sort by status (online first) then by name
+                        activeRelays.sort((a, b) => {
+                            if (a.status !== b.status) return a.status === 'online' ? -1 : 1;
+                            return a.name.localeCompare(b.name);
+                        });
+
+                        if (activeRelays.length > 0) {
                             return `
                                 <div class="detail-item">
-                                    <span class="detail-label">Relayed Via:</span>
-                                    <span class="detail-value" style="font-weight: 600; color: #667eea;">
-                                        ${escapeHtml(recentPacket.relay_node_name)}
-                                        <span style="font-size: 0.85em; color: #6c757d; font-family: monospace;">
-                                            (${escapeHtml(recentPacket.relay_node_id)})
+                                    <span class="detail-label">Active Relay Nodes:</span>
+                                    <span class="detail-value">${activeRelays.length} node${activeRelays.length !== 1 ? 's' : ''}</span>
+                                </div>
+                                ${activeRelays.map(relay => `
+                                    <div class="detail-item" style="margin-left: 20px;">
+                                        <span class="detail-label" style="display: inline-block; width: 12px; height: 12px; background: ${relay.status === 'online' ? '#28a745' : '#ffc107'}; border-radius: 50%; vertical-align: middle;"></span>
+                                        <span class="detail-value" style="font-weight: 600; color: #667eea;">
+                                            ${escapeHtml(relay.name)}
+                                            <span style="font-size: 0.85em; color: #6c757d; font-family: monospace;">
+                                                (${escapeHtml(relay.id)})
+                                            </span>
                                         </span>
-                                    </span>
-                                </div>
-                                <div class="detail-item">
-                                    <span class="detail-label">Hop Distance:</span>
-                                    <span class="detail-value">${recentPacket.hops_away !== null ? recentPacket.hops_away + ' hop' + (recentPacket.hops_away !== 1 ? 's' : '') : 'Unknown'}</span>
-                                </div>
+                                    </div>
+                                `).join('')}
                             `;
-                        } else if (recentPacket.hops_away === 0) {
+                        }
+
+                        // Check if this is a direct connection
+                        const recentPacket = packetsData.packets[0];
+                        if (recentPacket.hops_away === 0) {
                             return `
                                 <div class="detail-item">
                                     <span class="detail-label">Connection:</span>
@@ -447,7 +496,7 @@ async function showNodeDetails(nodeId) {
                                 </div>
                                 <div class="detail-item">
                                     <span class="detail-label">Relay Node:</span>
-                                    <span class="detail-value" style="color: #6c757d;">Unknown - not yet identified</span>
+                                    <span class="detail-value" style="color: #6c757d;">Unknown or offline</span>
                                 </div>
                             `;
                         }
