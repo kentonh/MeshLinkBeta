@@ -3,16 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MeshLink Network Map</title>
+    <title>MeshLink Coverage Map</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="css/map.css">
+    <style>
+        /* Additional styles for coverage map */
+        .legend-section .legend-subtitle {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 8px;
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+        .legend-circle {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+            vertical-align: middle;
+            border: 2px solid rgba(102, 126, 234, 0.5);
+            background: rgba(102, 126, 234, 0.15);
+        }
+        .legend-polygon {
+            width: 20px;
+            height: 14px;
+            display: inline-block;
+            margin-right: 8px;
+            vertical-align: middle;
+            background: rgba(156, 39, 176, 0.15);
+            border: 2px solid rgba(156, 39, 176, 0.5);
+            border-radius: 4px;
+        }
+    </style>
 </head>
 <body>
     <div class="map-page">
         <!-- Header -->
         <header class="map-header">
             <div class="header-left">
-                <h1>MeshLink Network Map</h1>
+                <h1>MeshLink Coverage Map</h1>
             </div>
             <div class="header-controls">
                 <select id="time-window" class="control-select">
@@ -23,24 +53,25 @@
                     <option value="720">Last 30 Days</option>
                 </select>
                 <button id="refresh-btn" class="control-btn">Refresh</button>
-                <a href="/nodes.html" class="control-btn nav-btn">Node List</a>
+                <a href="/nodes.html" class="control-btn nav-btn">Nodes</a>
                 <a href="/traceroutes.html" class="control-btn nav-btn">Traceroutes</a>
+                <a href="/telemetry.html" class="control-btn nav-btn">Telemetry</a>
             </div>
         </header>
 
         <!-- Stats Bar -->
         <div class="stats-bar">
             <div class="stat-item">
-                <span class="stat-label">Nodes on Map:</span>
+                <span class="stat-label">Nodes:</span>
                 <span id="stat-nodes" class="stat-value">0</span>
             </div>
             <div class="stat-item">
-                <span class="stat-label">Connections:</span>
-                <span id="stat-connections" class="stat-value">0</span>
+                <span class="stat-label">Direct Links:</span>
+                <span id="stat-direct" class="stat-value">0</span>
             </div>
             <div class="stat-item">
-                <span class="stat-label">Traceroute Links:</span>
-                <span id="stat-traceroutes" class="stat-value">0</span>
+                <span class="stat-label">Indirect Coverage:</span>
+                <span id="stat-indirect" class="stat-value">0</span>
             </div>
             <div class="stat-item loading-indicator" id="loading-indicator">
                 <span class="spinner"></span>
@@ -56,14 +87,14 @@
         <!-- Legend -->
         <div class="map-legend" id="map-legend">
             <div class="legend-section">
-                <div class="legend-title">Node Status (Last Heard)</div>
+                <div class="legend-title">Node Status</div>
                 <div class="legend-item">
                     <span class="legend-marker" style="background: #4caf50;"></span>
-                    <span>Online (&lt;1 hour)</span>
+                    <span>Online (&lt;3 hours)</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-marker" style="background: #8bc34a;"></span>
-                    <span>Recent (&lt;24 hours)</span>
+                    <span>Recent (&lt;12 hours)</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-marker" style="background: #ffc107;"></span>
@@ -71,35 +102,39 @@
                 </div>
                 <div class="legend-item">
                     <span class="legend-marker" style="background: #f44336;"></span>
-                    <span>Older (&gt;7 days)</span>
-                </div>
-                <div class="legend-item">
-                    <span class="legend-marker" style="background: #9e9e9e;"></span>
-                    <span>Unknown</span>
+                    <span>Older</span>
                 </div>
             </div>
             <div class="legend-section">
-                <div class="legend-title">Connection Quality (Signal)</div>
+                <div class="legend-title">Direct Connections</div>
+                <div class="legend-subtitle">Confirmed RF links</div>
                 <div class="legend-item">
-                    <span class="legend-line" style="background: #4caf50;"></span>
-                    <span>Good (RSSI &gt; -110)</span>
+                    <span class="legend-line" style="background: #09af0f;"></span>
+                    <span>Good signal</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-line" style="background: #ffc107;"></span>
-                    <span>Fair (RSSI &gt; -120)</span>
+                    <span>Fair signal</span>
                 </div>
                 <div class="legend-item">
                     <span class="legend-line" style="background: #f44336;"></span>
-                    <span>Poor</span>
+                    <span>Poor signal</span>
                 </div>
                 <div class="legend-item">
-                    <span style="font-size: 0.85em; color: #888;">Only direct (1-hop) connections shown</span>
+                    <span class="legend-line" style="background: #667eea;"></span>
+                    <span>Unknown signal</span>
                 </div>
             </div>
             <div class="legend-section">
-                <div class="legend-title">Node Size</div>
+                <div class="legend-title">Indirect Coverage</div>
+                <div class="legend-subtitle">Inferred reach (2+ hops)</div>
                 <div class="legend-item">
-                    <span>Larger = Higher Battery</span>
+                    <span class="legend-circle"></span>
+                    <span>Single relay reach</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-polygon"></span>
+                    <span>Multi-relay coverage</span>
                 </div>
             </div>
             <button class="legend-toggle" id="legend-toggle">Hide Legend</button>

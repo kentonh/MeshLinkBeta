@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeshLink Telemetry Requests</title>
+    <link rel="stylesheet" href="css/nodes.css">
+    <style>
+        .status-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status-completed {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-timeout {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .signal-good { color: #28a745; font-weight: 600; }
+        .signal-fair { color: #ffc107; font-weight: 600; }
+        .signal-poor { color: #dc3545; font-weight: 600; }
+        .relay-info {
+            font-size: 0.9em;
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>MeshLink Telemetry Requests</h1>
+            <div class="stats-bar">
+                <div class="stat">
+                    <span class="stat-label">Total Requests:</span>
+                    <span id="stat-total" class="stat-value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Completed:</span>
+                    <span id="stat-completed" class="stat-value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Pending:</span>
+                    <span id="stat-pending" class="stat-value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Timeout:</span>
+                    <span id="stat-timeout" class="stat-value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Success Rate:</span>
+                    <span id="stat-success-rate" class="stat-value">0%</span>
+                </div>
+            </div>
+        </header>
+
+        <nav class="tab-nav">
+            <a href="/nodes.html" class="tab-btn">Nodes</a>
+            <a href="/map.html" class="tab-btn">Map</a>
+            <a href="/traceroutes.html" class="tab-btn">Traceroutes</a>
+            <a href="/telemetry.html" class="tab-btn active">Telemetry</a>
+        </nav>
+
+        <div class="tab-content active">
+            <div class="controls">
+                <input type="text" id="search" placeholder="Search by node name or ID..." class="search-box">
+                <select id="status-filter" class="filter-select">
+                    <option value="all">All Status</option>
+                    <option value="completed">Completed</option>
+                    <option value="pending">Pending</option>
+                    <option value="timeout">Timeout</option>
+                </select>
+                <select id="limit-select" class="filter-select">
+                    <option value="50">Show 50</option>
+                    <option value="100" selected>Show 100</option>
+                    <option value="200">Show 200</option>
+                    <option value="500">Show 500</option>
+                </select>
+                <button id="refresh-btn" class="refresh-btn">Refresh</button>
+            </div>
+
+            <div class="table-container">
+                <table id="telemetry-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Target Node</th>
+                            <th>Status</th>
+                            <th>Requested</th>
+                            <th>Completed</th>
+                            <th>Signal (SNR/RSSI)</th>
+                            <th>Relay</th>
+                            <th>Hops</th>
+                        </tr>
+                    </thead>
+                    <tbody id="telemetry-tbody">
+                        <tr>
+                            <td colspan="8" class="loading">Loading telemetry requests...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/telemetry.js"></script>
+</body>
+</html>

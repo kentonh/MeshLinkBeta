@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>🛤️ MeshLink Traceroutes</h1>
+            <h1>MeshLink Traceroutes</h1>
             <div class="stats-bar">
                 <div class="stat">
                     <span class="stat-label">Total Traceroutes:</span>
@@ -27,22 +27,22 @@
         </header>
 
         <nav class="tab-nav">
-            <a href="/" class="tab-btn" data-tab="nodes">📋 Node List</a>
-            <a href="/" class="tab-btn" data-tab="topology">🔗 Network Topology</a>
-            <a href="/" class="tab-btn" data-tab="map">🗺️ Map View</a>
-            <a href="/traceroutes.html" class="tab-btn tab-link">🛤️ Traceroutes</a>
+            <a href="/nodes.html" class="tab-btn">Nodes</a>
+            <a href="/map.html" class="tab-btn">Map</a>
+            <a href="/traceroutes.html" class="tab-btn active">Traceroutes</a>
+            <a href="/telemetry.html" class="tab-btn">Telemetry</a>
         </nav>
 
         <div class="tab-content active">
             <div class="controls">
-                <input type="text" id="search" placeholder="🔍 Search traceroutes..." class="search-box">
+                <input type="text" id="search" placeholder="Search traceroutes..." class="search-box">
                 <select id="limit-select" class="filter-select">
                     <option value="50">Show 50</option>
                     <option value="100" selected>Show 100</option>
                     <option value="200">Show 200</option>
                     <option value="500">Show 500</option>
                 </select>
-                <button id="refresh-btn" class="refresh-btn">🔄 Refresh</button>
+                <button id="refresh-btn" class="refresh-btn">Refresh</button>
             </div>
 
             <div class="table-container">

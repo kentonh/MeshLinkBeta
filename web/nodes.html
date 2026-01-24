@@ -10,7 +10,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>🌐 MeshLink Node Tracking</h1>
+            <h1>MeshLink Node Tracking</h1>
             <div class="stats-bar">
                 <div class="stat">
                     <span class="stat-label">Total Nodes:</span>
@@ -36,17 +36,18 @@
         </header>
 
         <nav class="tab-nav">
-            <button class="tab-btn active" data-tab="nodes">📋 Node List</button>
-            <button class="tab-btn" data-tab="topology">🔗 Network Topology</button>
-            <button class="tab-btn" data-tab="map">🗺️ Map View</button>
-            <a href="/map.html" class="tab-btn tab-link">🌐 Full Map</a>
-            <a href="/traceroutes.html" class="tab-btn tab-link">🛤️ Traceroutes</a>
+            <button class="tab-btn active" data-tab="nodes">Node List</button>
+            <button class="tab-btn" data-tab="topology">Topology</button>
+            <button class="tab-btn" data-tab="map">Mini Map</button>
+            <a href="/map.html" class="tab-btn tab-link">Map</a>
+            <a href="/traceroutes.html" class="tab-btn tab-link">Traceroutes</a>
+            <a href="/telemetry.html" class="tab-btn tab-link">Telemetry</a>
         </nav>
 
         <!-- Nodes Tab -->
         <div id="nodes-tab" class="tab-content active">
             <div class="controls">
-                <input type="text" id="search" placeholder="🔍 Search nodes..." class="search-box">
+                <input type="text" id="search" placeholder="Search nodes..." class="search-box">
                 <select id="filter-battery" class="filter-select">
                     <option value="">All Battery Levels</option>
                     <option value="high">High (>60%)</option>
@@ -59,7 +60,7 @@
                     <option value="battery">Sort: Battery</option>
                     <option value="packets">Sort: Packet Count</option>
                 </select>
-                <button id="refresh-btn" class="refresh-btn">🔄 Refresh</button>
+                <button id="refresh-btn" class="refresh-btn">Refresh</button>
             </div>
 
             <div class="table-container">
@@ -96,7 +97,7 @@
                     Link Quality Filter: <span id="quality-value">0</span>%
                     <input type="range" id="quality-filter" min="0" max="100" value="0">
                 </label>
-                <button id="refresh-topology-btn" class="refresh-btn">🔄 Refresh Topology</button>
+                <button id="refresh-topology-btn" class="refresh-btn">Refresh Topology</button>
             </div>
             <div id="topology-graph" class="topology-container">
                 <p class="info-message">Network topology visualization will appear here.<br>

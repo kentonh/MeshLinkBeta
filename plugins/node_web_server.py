@@ -85,14 +85,14 @@ class NodeWebServer(plugins.Base):
                 logger.warn(f"Error serving map.html: {e}")
                 return "Map page not found", 404
 
-        @self.app.route('/map3.html')
-        def map3_page():
-            """Serve coverage map page"""
+        @self.app.route('/telemetry.html')
+        def telemetry_page():
+            """Serve telemetry requests page"""
             try:
-                return send_from_directory(web_dir, 'map3.html')
+                return send_from_directory(web_dir, 'telemetry.html')
             except Exception as e:
-                logger.warn(f"Failed to serve map.html: {e}")
-                return "<h1>Network Map</h1><p>Map interface not yet available.</p>"
+                logger.warn(f"Failed to serve telemetry.html: {e}")
+                return "<h1>Telemetry</h1><p>Telemetry page not available.</p>"
         
         @self.app.route('/api/nodes', methods=['GET'])
         def get_nodes():
@@ -423,139 +423,7 @@ class NodeWebServer(plugins.Base):
 
         @self.app.route('/api/map-data', methods=['GET'])
         def get_map_data():
-            """Get combined data for map visualization including nodes, connections, and traceroutes"""
-            try:
-                from datetime import datetime, timedelta
-
-                # Get time window from query params (default 24 hours)
-                hours = int(request.args.get('hours', 24))
-                time_cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
-
-                # Get all nodes
-                all_nodes = self.db.get_all_nodes()
-
-                # Filter to nodes with GPS coordinates and seen within time window
-                nodes_with_gps = []
-                node_lookup = {}  # For quick lookup by node_id
-
-                for node in all_nodes:
-                    if node.get('latitude') and node.get('longitude'):
-                        # Filter by time window
-                        last_seen = node.get('last_seen_utc', '')
-                        if last_seen and last_seen < time_cutoff:
-                            continue
-
-                        node_data = {
-                            'id': node['node_id'],
-                            'name': node.get('long_name') or node.get('short_name') or node['node_id'],
-                            'shortName': node.get('short_name') or node['node_id'][-4:],
-                            'position': {
-                                'lat': node['latitude'],
-                                'lon': node['longitude'],
-                                'alt': node.get('altitude')
-                            },
-                            'battery': node.get('battery_level'),
-                            'hwModel': node.get('hardware_model'),
-                            'lastHeard': node.get('last_seen_utc'),
-                            'totalPackets': node.get('total_packets_received', 0),
-                            'isMqtt': node.get('is_mqtt', False)
-                        }
-                        nodes_with_gps.append(node_data)
-                        node_lookup[node['node_id']] = node_data
-
-                # Get topology connections
-                topology = self.db.get_topology(active_only=False)
-                connections = []
-
-                for link in topology:
-                    source_id = link['source_node_id']
-                    target_id = link['neighbor_node_id']
-
-                    # Filter by time window
-                    last_heard = link.get('last_heard_utc', '')
-                    if last_heard and last_heard < time_cutoff:
-                        continue
-
-                    # Only include connections where both nodes have GPS
-                    if source_id in node_lookup and target_id in node_lookup:
-                        connections.append({
-                            'from': source_id,
-                            'to': target_id,
-                            'rssi': link.get('avg_rssi'),
-                            'snr': link.get('avg_snr'),
-                            'quality': link.get('link_quality_score'),
-                            'packets': link.get('total_packets', 0),
-                            'lastHeard': link.get('last_heard_utc'),
-                            'isActive': link.get('is_active', False),
-                            'hopCount': link.get('last_hop_count', 1),
-                            'isDirect': link.get('last_hop_count', 1) == 1
-                        })
-
-                # Get traceroutes and add those connections too
-                traceroutes = self.db.get_all_traceroutes(limit=100)
-                traceroute_connections = []
-
-                for trace in traceroutes:
-                    # Filter by time window
-                    trace_time = trace.get('received_at_utc', '')
-                    if trace_time and trace_time < time_cutoff:
-                        continue
-
-                    route = trace.get('route', [])
-                    snr_data = trace.get('snr_data') or []
-
-                    for i in range(len(route) - 1):
-                        from_id = route[i]
-                        to_id = route[i + 1]
-
-                        # Only include if both nodes have GPS
-                        if from_id in node_lookup and to_id in node_lookup:
-                            snr = snr_data[i] if i < len(snr_data) else None
-                            traceroute_connections.append({
-                                'from': from_id,
-                                'to': to_id,
-                                'snr': snr,
-                                'fromTraceroute': True,
-                                'traceTime': trace.get('received_at_utc')
-                            })
-
-                # Calculate map center (average of all node positions)
-                if nodes_with_gps:
-                    avg_lat = sum(n['position']['lat'] for n in nodes_with_gps) / len(nodes_with_gps)
-                    avg_lon = sum(n['position']['lon'] for n in nodes_with_gps) / len(nodes_with_gps)
-                    map_center = [avg_lat, avg_lon]
-                else:
-                    map_center = [0, 0]
-
-                # Stats
-                stats = {
-                    'totalNodes': len(all_nodes),
-                    'nodesWithGps': len(nodes_with_gps),
-                    'totalConnections': len(connections),
-                    'tracerouteConnections': len(traceroute_connections),
-                    'mapCenter': map_center
-                }
-
-                return jsonify({
-                    'success': True,
-                    'nodes': nodes_with_gps,
-                    'connections': connections,
-                    'tracerouteConnections': traceroute_connections,
-                    'stats': stats
-                })
-
-            except Exception as e:
-                logger.warn(f"Error getting map data: {e}")
-                import traceback
-                traceback.print_exc()
-                return jsonify({
-                    'success': False,
-                    'error': str(e)
-                }), 500
-
-        @self.app.route('/api/map3-data', methods=['GET'])
-        def get_map3_data():
-            """Get connection data for coverage map (map3) based on connection-logic.md specs"""
+            """Get connection data for coverage map based on connection-logic.md specs"""
             try:
                 from datetime import datetime, timedelta
 
@@ -764,7 +632,54 @@ class NodeWebServer(plugins.Base):
                 })
 
             except Exception as e:
-                logger.warn(f"Error getting map3 data: {e}")
+                logger.warn(f"Error getting map data: {e}")
+                import traceback
+                traceback.print_exc()
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+
+        @self.app.route('/api/telemetry-requests', methods=['GET'])
+        def get_telemetry_requests():
+            """Get telemetry requests with optional filtering"""
+            try:
+                limit = int(request.args.get('limit', 100))
+                status = request.args.get('status')
+
+                # Get requests
+                if status and status != 'all':
+                    requests = self.db.get_telemetry_requests(limit=limit, status=status)
+                else:
+                    requests = self.db.get_telemetry_requests(limit=limit)
+
+                # Get stats
+                stats = {
+                    'total': 0,
+                    'completed': 0,
+                    'pending': 0,
+                    'timeout': 0
+                }
+
+                # Count by status
+                all_requests = self.db.get_telemetry_requests(limit=10000)
+                for req in all_requests:
+                    stats['total'] += 1
+                    if req['status'] == 'completed':
+                        stats['completed'] += 1
+                    elif req['status'] == 'pending':
+                        stats['pending'] += 1
+                    elif req['status'] == 'timeout':
+                        stats['timeout'] += 1
+
+                return jsonify({
+                    'success': True,
+                    'requests': requests,
+                    'stats': stats
+                })
+
+            except Exception as e:
+                logger.warn(f"Error getting telemetry requests: {e}")
                 import traceback
                 traceback.print_exc()
                 return jsonify({

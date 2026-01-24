@@ -11,9 +11,11 @@
  - HF condition checker
  - Time
  - Save position as waypoint with timestamp
- - ChatGPT with **optional** plugin
- - Help command with multi page support
+ - info help command with multi page support
  - **Scheduled messages** - Automatically send messages at configured intervals (see [SCHEDULER_README.md](SCHEDULER_README.md))
+ - **Mesh Packet tracking** - logs packets received over mesh, stores in database, and serves view accessable via browser.
+ - **Automatic Mesh Testing** - with scheduled traceroutes and node info packets, tracked in the database.
+ - **Inferred node neighbor** - using Relayed By data, a inferred mesh topography is constructed.
 
 ## Commands
 **prefix + command**
@@ -76,9 +78,9 @@ A monitoring script (`check_meshlink.sh`) is included to automatically start Mes
 
 ## Updating
 You may receive a log in the console like this:
-`[INFO] New MeshLink update ready https://github.com/Murturtle/MeshLinkBeta`
+`[INFO] New MeshLink update ready https://github.com/kentonh/MeshLinkBeta`
 
-run `git pull https://github.com/Murturtle/MeshLinkBeta main` to pull the latest version without overriding config
+run `git pull https://github.com/kentonh/MeshLinkBeta main` to pull the latest version without overriding config
 Make sure to increment the `rev` setting in `config.yml` or you will keep getting notified that there is an update!
 
 ## Suggestions/Feature Requests

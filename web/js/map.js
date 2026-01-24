@@ -1,32 +1,32 @@
-// MeshLink Network Map - JavaScript
+// MeshLink Coverage Map - map3.js
+// Implements connection logic from connection-logic.md
 
-// API Configuration
 const API_BASE = window.location.origin;
 
 // Global state
 let map = null;
 let mapData = null;
 let nodeMarkers = [];
-let connectionLines = [];
-let tracerouteLines = [];
+let directConnectionLines = [];
+let indirectCoverageShapes = [];
 let selectedNode = null;
+let selectedShape = null;
 let timeWindow = 24;
+
+// Opacity settings
+const DEFAULT_OPACITY = 0.2;
+const SELECTED_OPACITY = 0.7;
+
+// Map configuration
+const MAP_CENTER = [37.6872, -97.3301]; // Wichita, Kansas
+const MAP_ZOOM = 13;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     initializeMap();
     initializeControls();
     loadMapData();
-
-    // Auto-refresh every 60 seconds
-//    setInterval(() => {
-//        loadMapData(true);
-//    }, 60000);
 });
-
-// Map configuration
-const MAP_CENTER = [37.6872, -97.3301]; // Wichita, Kansas
-const MAP_ZOOM = 13; // ~5km scale
 
 // Initialize Leaflet map
 function initializeMap() {
@@ -36,40 +36,34 @@ function initializeMap() {
         zoomControl: true
     });
 
-    // Add OpenStreetMap tile layer
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 19
     }).addTo(map);
 
-    // Close details panel when clicking on map
     map.on('click', function() {
+        deselectAllShapes();
         closeDetailsPanel();
     });
 }
 
 // Initialize controls
 function initializeControls() {
-    // Time window selector
-    const timeSelect = document.getElementById('time-window');
-    timeSelect.addEventListener('change', (e) => {
+    document.getElementById('time-window').addEventListener('change', (e) => {
         timeWindow = parseInt(e.target.value);
         loadMapData();
     });
 
-    // Refresh button
     document.getElementById('refresh-btn').addEventListener('click', () => {
         loadMapData();
     });
 
-    // Legend toggle
     document.getElementById('legend-toggle').addEventListener('click', function() {
         const legend = document.getElementById('map-legend');
         const isHidden = legend.classList.toggle('collapsed');
         this.textContent = isHidden ? 'Show Legend' : 'Hide Legend';
     });
 
-    // Close details panel
     document.getElementById('close-details').addEventListener('click', closeDetailsPanel);
 }
 
@@ -99,9 +93,9 @@ async function loadMapData(silent = false) {
 
 // Update statistics display
 function updateStats(stats) {
-    document.getElementById('stat-nodes').textContent = stats.nodesWithGps || 0;
-    document.getElementById('stat-connections').textContent = stats.totalConnections || 0;
-    document.getElementById('stat-traceroutes').textContent = stats.tracerouteConnections || 0;
+    document.getElementById('stat-nodes').textContent = stats.totalNodes || 0;
+    document.getElementById('stat-direct').textContent = stats.directConnections || 0;
+    document.getElementById('stat-indirect').textContent = stats.indirectCoverage || 0;
 }
 
 // Show/hide loading indicator
@@ -110,101 +104,110 @@ function showLoading(show) {
     indicator.style.display = show ? 'flex' : 'none';
 }
 
-// Render the map with nodes and connections
+// Render the map
 function renderMap() {
     if (!mapData) return;
 
-    // Clear existing markers and lines
     clearMapLayers();
 
     const nodes = mapData.nodes || [];
-    const connections = mapData.connections || [];
-    const tracerouteConnections = mapData.tracerouteConnections || [];
+    const directConnections = mapData.directConnections || [];
+    const indirectCoverage = mapData.indirectCoverage || [];
 
-    // Create node lookup for connections
+    // Create node lookup
     const nodeById = {};
     nodes.forEach(node => {
         nodeById[node.id] = node;
     });
 
-    // Draw topology connections first (under markers)
-    connections.forEach(conn => {
-        const fromNode = nodeById[conn.from];
-        const toNode = nodeById[conn.to];
-
-        if (fromNode && toNode) {
-            const line = drawConnection(fromNode, toNode, conn);
-            if (line) {
-                connectionLines.push(line);
+    // Draw indirect coverage shapes first (under everything)
+    // Shape centered on RELAY node, edges defined by SENDING nodes
+    indirectCoverage.forEach(coverage => {
+        const relayNode = nodeById[coverage.relayNodeId];
+        if (relayNode) {
+            const shape = drawIndirectCoverage(relayNode, coverage, nodeById);
+            if (shape) {
+                indirectCoverageShapes.push(shape);
             }
         }
     });
 
-    // Draw traceroute connections (different style)
-    tracerouteConnections.forEach(conn => {
+    // Draw direct connections
+    directConnections.forEach(conn => {
         const fromNode = nodeById[conn.from];
         const toNode = nodeById[conn.to];
 
         if (fromNode && toNode) {
-            const line = drawTracerouteConnection(fromNode, toNode, conn);
+            const line = drawDirectConnection(fromNode, toNode, conn);
             if (line) {
-                tracerouteLines.push(line);
+                directConnectionLines.push(line);
             }
         }
     });
 
-    // Draw node markers
+    // Draw node markers on top
     nodes.forEach(node => {
         const marker = createNodeMarker(node);
         nodeMarkers.push(marker);
     });
-
-    // Map stays fixed on Wichita - don't auto-fit to nodes
 }
 
 // Clear all map layers
 function clearMapLayers() {
     nodeMarkers.forEach(marker => marker.remove());
-    connectionLines.forEach(line => line.remove());
-    tracerouteLines.forEach(line => line.remove());
+    directConnectionLines.forEach(line => line.remove());
+    indirectCoverageShapes.forEach(shape => shape.remove());
 
     nodeMarkers = [];
-    connectionLines = [];
-    tracerouteLines = [];
+    directConnectionLines = [];
+    indirectCoverageShapes = [];
+    selectedShape = null;
+}
+
+// Deselect all shapes and lines
+function deselectAllShapes() {
+    // Reset all direct connection lines to default opacity
+    directConnectionLines.forEach(line => {
+        line.setStyle({ opacity: DEFAULT_OPACITY });
+    });
+
+    // Reset all indirect coverage shapes to default opacity
+    indirectCoverageShapes.forEach(shape => {
+        shape.setStyle({
+            opacity: DEFAULT_OPACITY,
+            fillOpacity: DEFAULT_OPACITY
+        });
+    });
+
+    selectedShape = null;
 }
 
 // Get node color based on last heard time
 function getNodeColor(node) {
-    if (!node.lastHeard) return '#9e9e9e'; // Gray - unknown
+    if (!node.lastHeard) return '#9e9e9e';
 
     const lastHeard = parseUTCDate(node.lastHeard);
     const now = new Date();
     const ageHours = (now - lastHeard) / (1000 * 60 * 60);
 
-    if (ageHours < 3) return '#4caf50';    // Green - very recent
+    if (ageHours < 3) return '#4caf50';    // Green - online
     if (ageHours < 12) return '#8bc34a';   // Light green - recent
-    if (ageHours < 24) return '#ffc107';  // Yellow - this week
+    if (ageHours < 168) return '#ffc107';  // Yellow - this week
     return '#f44336';                       // Red - old
 }
 
 // Get connection color based on signal quality
 function getConnectionColor(rssi, snr) {
-    if (rssi === null || rssi === undefined) return '#1a1919';
+    if (rssi === null || rssi === undefined) return '#667eea'; // Purple - unknown
     if (rssi > -110 && (snr === null || snr > 0)) return '#09af0f';  // Green - good
     if (rssi > -120 && (snr === null || snr > -5)) return '#ffc107'; // Yellow - fair
     return '#f44336'; // Red - poor
 }
 
-// Get marker radius based on battery level
-function getNodeRadius(battery) {
-    if (!battery) return 8;
-    return 5 + (battery / 100); // 5-15px based on battery
-}
-
 // Create a node marker
 function createNodeMarker(node) {
     const color = getNodeColor(node);
-    const radius = getNodeRadius(node.battery);
+    const radius = node.battery ? 5 + (node.battery / 20) : 8;
 
     const marker = L.circleMarker([node.position.lat, node.position.lon], {
         radius: radius,
@@ -215,25 +218,22 @@ function createNodeMarker(node) {
         fillOpacity: 0.85
     }).addTo(map);
 
-    // Add popup
-    const popupContent = createNodePopup(node);
-    marker.bindPopup(popupContent, {
-        maxWidth: 300,
-        className: 'node-popup'
-    });
-
-    // Add tooltip with node name
+    // Tooltip with node name
     marker.bindTooltip(node.shortName || node.name, {
         permanent: false,
         direction: 'top',
         offset: [0, -radius]
     });
 
-    // Click handler for details panel
+    // Click handler
     marker.on('click', function(e) {
         L.DomEvent.stopPropagation(e);
         showNodeDetails(node);
     });
+
+    // Popup
+    const popupContent = createNodePopup(node);
+    marker.bindPopup(popupContent, { maxWidth: 300 });
 
     return marker;
 }
@@ -256,25 +256,13 @@ function createNodePopup(node) {
                     <span class="popup-label">Battery:</span>
                     <span>${batteryStr}</span>
                 </div>
-                ${node.hwModel ? `
                 <div class="popup-row">
-                    <span class="popup-label">Hardware:</span>
-                    <span>${escapeHtml(node.hwModel)}</span>
+                    <span class="popup-label">Direct Links:</span>
+                    <span>${node.directLinkCount || 0}</span>
                 </div>
-                ` : ''}
                 <div class="popup-row">
                     <span class="popup-label">Position:</span>
                     <span>${node.position.lat.toFixed(5)}, ${node.position.lon.toFixed(5)}</span>
-                </div>
-                ${node.position.alt ? `
-                <div class="popup-row">
-                    <span class="popup-label">Altitude:</span>
-                    <span>${node.position.alt.toFixed(0)}m</span>
-                </div>
-                ` : ''}
-                <div class="popup-row">
-                    <span class="popup-label">Packets:</span>
-                    <span>${node.totalPackets || 0}</span>
                 </div>
             </div>
             <button class="popup-btn" onclick="showNodeDetails(mapData.nodes.find(n => n.id === '${node.id}'))">
@@ -284,11 +272,8 @@ function createNodePopup(node) {
     `;
 }
 
-// Draw a topology connection line
-function drawConnection(fromNode, toNode, conn) {
-    // Only draw direct connections (1 hop)
-    if (!conn.isDirect) return null;
-
+// Draw a direct connection line
+function drawDirectConnection(fromNode, toNode, conn) {
     const color = getConnectionColor(conn.rssi, conn.snr);
 
     const line = L.polyline([
@@ -296,18 +281,26 @@ function drawConnection(fromNode, toNode, conn) {
         [toNode.position.lat, toNode.position.lon]
     ], {
         color: color,
-        weight: 14,
-        opacity: 0.9
+        weight: 6,
+        opacity: DEFAULT_OPACITY
     }).addTo(map);
 
-    // Add popup with connection info
+    // Click handler to highlight
+    line.on('click', function(e) {
+        L.DomEvent.stopPropagation(e);
+        deselectAllShapes();
+        line.setStyle({ opacity: SELECTED_OPACITY });
+        selectedShape = line;
+    });
+
+    // Popup with connection info
     const rssiStr = conn.rssi !== null ? `${conn.rssi.toFixed(1)} dBm` : 'N/A';
     const snrStr = conn.snr !== null ? `${conn.snr.toFixed(1)} dB` : 'N/A';
-    const qualityStr = conn.quality !== null ? `${conn.quality.toFixed(0)}%` : 'N/A';
+    const sourceStr = conn.source || 'packet';
 
     line.bindPopup(`
         <div class="popup-content">
-            <div class="popup-title">${escapeHtml(fromNode.shortName)} → ${escapeHtml(toNode.shortName)}</div>
+            <div class="popup-title">${escapeHtml(fromNode.shortName)} ↔ ${escapeHtml(toNode.shortName)}</div>
             <div class="popup-details">
                 <div class="popup-row">
                     <span class="popup-label">RSSI:</span>
@@ -318,16 +311,12 @@ function drawConnection(fromNode, toNode, conn) {
                     <span>${snrStr}</span>
                 </div>
                 <div class="popup-row">
-                    <span class="popup-label">Quality:</span>
-                    <span>${qualityStr}</span>
+                    <span class="popup-label">Source:</span>
+                    <span>${sourceStr}</span>
                 </div>
                 <div class="popup-row">
                     <span class="popup-label">Packets:</span>
-                    <span>${conn.packets || 0}</span>
-                </div>
-                <div class="popup-row">
-                    <span class="popup-label">Connection:</span>
-                    <span>${conn.isDirect ? 'Direct' : 'Multi-hop'}</span>
+                    <span>${conn.packetCount || 0}</span>
                 </div>
             </div>
         </div>
@@ -336,64 +325,161 @@ function drawConnection(fromNode, toNode, conn) {
     return line;
 }
 
-// Draw a traceroute connection line (different style)
-function drawTracerouteConnection(fromNode, toNode, conn) {
-    // Check if this connection already exists in topology connections
-    const exists = mapData.connections.some(c =>
-        (c.from === conn.from && c.to === conn.to) ||
-        (c.from === conn.to && c.to === conn.from)
-    );
+// Draw indirect coverage shape (ellipse)
+// relayNode is the CENTER of the shape
+// sendingNodes define the boundary (up to 4 farthest nodes)
+function drawIndirectCoverage(relayNode, coverage, nodeById) {
+    const sendingNodes = coverage.sendingNodeIds
+        .map(id => nodeById[id])
+        .filter(n => n && n.position);
 
-    // Skip if already drawn as topology connection
-    if (exists) return null;
+    if (sendingNodes.length === 0) return null;
 
-    const line = L.polyline([
-        [fromNode.position.lat, fromNode.position.lon],
-        [toNode.position.lat, toNode.position.lon]
-    ], {
-        color: '#9c27b0', // Purple for traceroute-only connections
+    const relayLat = relayNode.position.lat;
+    const relayLon = relayNode.position.lon;
+
+    // Calculate distances from relay to each sending node
+    const nodesWithDistance = sendingNodes.map(node => ({
+        node: node,
+        distance: calculateDistance(relayLat, relayLon, node.position.lat, node.position.lon)
+    }));
+
+    // Sort by distance (farthest first) and take up to 4
+    nodesWithDistance.sort((a, b) => b.distance - a.distance);
+    const farthestNodes = nodesWithDistance.slice(0, 4);
+
+    // Create ellipse based on farthest nodes
+    const ellipse = createEllipse(relayLat, relayLon, farthestNodes);
+
+    const shape = L.polygon(ellipse.points, {
+        color: 'rgba(102, 126, 234, 0.8)',
+        fillColor: 'rgba(102, 126, 234, 0.4)',
+        opacity: DEFAULT_OPACITY,
+        fillOpacity: DEFAULT_OPACITY,
         weight: 2,
-        opacity: 0.5,
-        dashArray: '3, 8'
+        dashArray: '5, 10'
     }).addTo(map);
 
-    const snrStr = conn.snr !== null ? `${conn.snr.toFixed(1)} dB` : 'N/A';
+    // Click handler to highlight
+    shape.on('click', function(e) {
+        L.DomEvent.stopPropagation(e);
+        deselectAllShapes();
+        shape.setStyle({
+            opacity: SELECTED_OPACITY,
+            fillOpacity: SELECTED_OPACITY
+        });
+        selectedShape = shape;
+    });
 
-    line.bindPopup(`
+    const farthestNames = farthestNodes.map(n => n.node.shortName).join(', ');
+
+    shape.bindPopup(`
         <div class="popup-content">
-            <div class="popup-title">Traceroute: ${escapeHtml(fromNode.shortName)} → ${escapeHtml(toNode.shortName)}</div>
+            <div class="popup-title">Indirect Coverage: ${escapeHtml(relayNode.shortName)}</div>
             <div class="popup-details">
                 <div class="popup-row">
-                    <span class="popup-label">SNR:</span>
-                    <span>${snrStr}</span>
+                    <span class="popup-label">Relay Node:</span>
+                    <span>${escapeHtml(relayNode.shortName)}</span>
                 </div>
                 <div class="popup-row">
-                    <span class="popup-label">Source:</span>
-                    <span>Traceroute data</span>
+                    <span class="popup-label">Total Nodes Reached:</span>
+                    <span>${sendingNodes.length}</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">Farthest Nodes:</span>
+                    <span>${escapeHtml(farthestNames)}</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">Max Range:</span>
+                    <span>${(ellipse.semiMajor / 1000).toFixed(2)} km</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">Hop Count:</span>
+                    <span>2+</span>
                 </div>
             </div>
         </div>
-    `, { maxWidth: 250 });
+    `);
 
-    return line;
+    return shape;
 }
 
-// Fit map bounds to show all nodes
-function fitMapBounds(nodes) {
-    if (nodes.length === 0) return;
-
-    if (nodes.length === 1) {
-        const node = nodes[0];
-        map.setView([node.position.lat, node.position.lon], 13);
-    } else {
-        const bounds = L.latLngBounds(nodes.map(n => [n.position.lat, n.position.lon]));
-        map.fitBounds(bounds, { padding: [50, 50] });
+// Create ellipse points from center and farthest nodes
+function createEllipse(centerLat, centerLon, farthestNodes) {
+    if (farthestNodes.length === 0) {
+        return { points: [], semiMajor: 0, semiMinor: 0 };
     }
+
+    // Calculate semi-major axis (farthest distance)
+    const semiMajor = farthestNodes[0].distance;
+
+    // Calculate semi-minor axis
+    let semiMinor;
+    if (farthestNodes.length === 1) {
+        // Single node: make a circle
+        semiMinor = semiMajor;
+    } else if (farthestNodes.length === 2) {
+        // Two nodes: semi-minor is the shorter distance, or 70% of major if both similar
+        semiMinor = Math.min(farthestNodes[1].distance, semiMajor * 0.7);
+    } else {
+        // 3-4 nodes: use average of non-primary nodes for semi-minor
+        const otherDistances = farthestNodes.slice(1).map(n => n.distance);
+        semiMinor = otherDistances.reduce((a, b) => a + b, 0) / otherDistances.length;
+    }
+
+    // Ensure semi-minor is at least 50% of semi-major for reasonable ellipse shape
+    semiMinor = Math.max(semiMinor, semiMajor * 0.5);
+
+    // Calculate rotation angle based on farthest node direction
+    const farthestNode = farthestNodes[0].node;
+    const rotation = Math.atan2(
+        farthestNode.position.lat - centerLat,
+        farthestNode.position.lon - centerLon
+    );
+
+    // Generate ellipse points (polygon approximation)
+    const numPoints = 64;
+    const points = [];
+
+    for (let i = 0; i < numPoints; i++) {
+        const angle = (2 * Math.PI * i) / numPoints;
+
+        // Ellipse parametric equations
+        const x = semiMajor * Math.cos(angle);
+        const y = semiMinor * Math.sin(angle);
+
+        // Rotate by the calculated angle
+        const rotatedX = x * Math.cos(rotation) - y * Math.sin(rotation);
+        const rotatedY = x * Math.sin(rotation) + y * Math.cos(rotation);
+
+        // Convert meters to lat/lon offset (approximate)
+        const latOffset = rotatedY / 111320; // meters to degrees latitude
+        const lonOffset = rotatedX / (111320 * Math.cos(centerLat * Math.PI / 180)); // meters to degrees longitude
+
+        points.push([centerLat + latOffset, centerLon + lonOffset]);
+    }
+
+    return { points, semiMajor, semiMinor };
+}
+
+// Calculate distance between two points in meters (Haversine formula)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371000; // Earth's radius in meters
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
 }
 
 // Show node details in side panel
 function showNodeDetails(node) {
     selectedNode = node;
+
+    // Highlight related shapes
+    highlightNodeShapes(node.id);
 
     const panel = document.getElementById('details-panel');
     const title = document.getElementById('details-title');
@@ -403,6 +489,10 @@ function showNodeDetails(node) {
 
     const lastHeard = node.lastHeard ? formatDateTime(node.lastHeard) : 'Unknown';
     const lastHeardRel = node.lastHeard ? formatRelativeTime(node.lastHeard) : '';
+
+    // Get connections for this node
+    const directLinks = getNodeDirectConnections(node.id);
+    const indirectInfo = getNodeIndirectCoverage(node.id);
 
     content.innerHTML = `
         <div class="detail-section">
@@ -429,10 +519,6 @@ function showNodeDetails(node) {
                 <span class="detail-label">Last Heard:</span>
                 <span class="detail-value">${lastHeard}<br><small>${lastHeardRel}</small></span>
             </div>
-            <div class="detail-row">
-                <span class="detail-label">Total Packets:</span>
-                <span class="detail-value">${node.totalPackets || 0}</span>
-            </div>
             ${node.battery !== null ? `
             <div class="detail-row">
                 <span class="detail-label">Battery:</span>
@@ -444,21 +530,13 @@ function showNodeDetails(node) {
                 </span>
             </div>
             ` : ''}
-            <div class="detail-row">
-                <span class="detail-label">MQTT Node:</span>
-                <span class="detail-value">${node.isMqtt ? 'Yes' : 'No'}</span>
-            </div>
         </div>
 
         <div class="detail-section">
             <h4>Location</h4>
             <div class="detail-row">
-                <span class="detail-label">Latitude:</span>
-                <span class="detail-value">${node.position.lat.toFixed(6)}</span>
-            </div>
-            <div class="detail-row">
-                <span class="detail-label">Longitude:</span>
-                <span class="detail-value">${node.position.lon.toFixed(6)}</span>
+                <span class="detail-label">Coordinates:</span>
+                <span class="detail-value">${node.position.lat.toFixed(6)}, ${node.position.lon.toFixed(6)}</span>
             </div>
             ${node.position.alt ? `
             <div class="detail-row">
@@ -467,57 +545,153 @@ function showNodeDetails(node) {
             </div>
             ` : ''}
             <div class="detail-row">
-                <a href="https://www.google.com/maps/search/?api=1&query=${node.position.lat},${node.position.lon}"
+                <a href="https://www.openstreetmap.org/?mlat=${node.position.lat}&mlon=${node.position.lon}&zoom=15"
                    target="_blank" class="detail-link">
-                    Open in Google Maps
+                    Open in OpenStreetMap
                 </a>
             </div>
         </div>
 
         <div class="detail-section">
-            <h4>Connections</h4>
-            ${getNodeConnections(node.id)}
+            <h4>Direct Connections (${directLinks.length})</h4>
+            ${directLinks.length > 0 ? directLinks.map(link => `
+                <div class="connection-item">
+                    <div class="connection-name">${escapeHtml(link.otherName)}</div>
+                    <div class="connection-stats">
+                        <span>RSSI: ${link.rssi !== null ? link.rssi.toFixed(0) + ' dBm' : 'N/A'}</span>
+                        <span>Source: ${link.source}</span>
+                    </div>
+                </div>
+            `).join('') : '<p class="no-data">No direct connections</p>'}
         </div>
 
+        ${indirectInfo ? `
+        <div class="detail-section">
+            <h4>Indirect Coverage</h4>
+            ${indirectInfo.role === 'relay' ? `
+            <div class="detail-row">
+                <span class="detail-label">Role:</span>
+                <span class="detail-value">Relay Node</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Reaches (2+ hops):</span>
+                <span class="detail-value">${indirectInfo.nodeCount} nodes</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Nodes:</span>
+                <span class="detail-value">${escapeHtml(indirectInfo.nodeNames)}</span>
+            </div>
+            ` : `
+            <div class="detail-row">
+                <span class="detail-label">Role:</span>
+                <span class="detail-value">Reached via relay</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Through:</span>
+                <span class="detail-value">${indirectInfo.nodeCount} relay(s)</span>
+            </div>
+            <div class="detail-row">
+                <span class="detail-label">Relays:</span>
+                <span class="detail-value">${escapeHtml(indirectInfo.nodeNames)}</span>
+            </div>
+            `}
+        </div>
+        ` : ''}
+
         <div class="detail-actions">
-            <a href="/nodes.html" class="action-btn">View in Node List</a>
+            <a href="/nodes.html?node=${encodeURIComponent(node.id)}" class="action-btn">View Full Details</a>
         </div>
     `;
 
     panel.classList.add('open');
 }
 
-// Get connections for a specific node
-function getNodeConnections(nodeId) {
-    if (!mapData) return '<p>No data</p>';
+// Highlight shapes related to a node
+function highlightNodeShapes(nodeId) {
+    deselectAllShapes();
 
-    const connections = mapData.connections.filter(c =>
+    // Highlight direct connections involving this node
+    if (mapData && mapData.directConnections) {
+        mapData.directConnections.forEach((conn, index) => {
+            if (conn.from === nodeId || conn.to === nodeId) {
+                if (directConnectionLines[index]) {
+                    directConnectionLines[index].setStyle({ opacity: SELECTED_OPACITY });
+                }
+            }
+        });
+    }
+
+    // Highlight indirect coverage shapes for this node (as relay or sending)
+    if (mapData && mapData.indirectCoverage) {
+        mapData.indirectCoverage.forEach((coverage, index) => {
+            if (coverage.relayNodeId === nodeId || coverage.sendingNodeIds.includes(nodeId)) {
+                if (indirectCoverageShapes[index]) {
+                    indirectCoverageShapes[index].setStyle({
+                        opacity: SELECTED_OPACITY,
+                        fillOpacity: SELECTED_OPACITY
+                    });
+                }
+            }
+        });
+    }
+}
+
+// Get direct connections for a node
+function getNodeDirectConnections(nodeId) {
+    if (!mapData || !mapData.directConnections) return [];
+
+    const connections = mapData.directConnections.filter(c =>
         c.from === nodeId || c.to === nodeId
     );
-
-    if (connections.length === 0) {
-        return '<p class="no-data">No connections found</p>';
-    }
 
     return connections.map(conn => {
         const otherId = conn.from === nodeId ? conn.to : conn.from;
         const otherNode = mapData.nodes.find(n => n.id === otherId);
-        const otherName = otherNode ? otherNode.shortName : otherId.slice(-4);
+        return {
+            otherId: otherId,
+            otherName: otherNode ? otherNode.shortName : otherId.slice(-4),
+            rssi: conn.rssi,
+            snr: conn.snr,
+            source: conn.source || 'packet'
+        };
+    });
+}
 
-        const rssiStr = conn.rssi !== null ? `${conn.rssi.toFixed(0)} dBm` : 'N/A';
-        const snrStr = conn.snr !== null ? `${conn.snr.toFixed(1)} dB` : 'N/A';
-        const direction = conn.from === nodeId ? '→' : '←';
+// Get indirect coverage info for a node (if it's a relay node)
+function getNodeIndirectCoverage(nodeId) {
+    if (!mapData || !mapData.indirectCoverage) return null;
 
-        return `
-            <div class="connection-item">
-                <div class="connection-name">${direction} ${escapeHtml(otherName)}</div>
-                <div class="connection-stats">
-                    <span>RSSI: ${rssiStr}</span>
-                    <span>SNR: ${snrStr}</span>
-                </div>
-            </div>
-        `;
-    }).join('');
+    // Check if this node is a relay for indirect connections
+    const asRelay = mapData.indirectCoverage.find(c => c.relayNodeId === nodeId);
+    if (asRelay) {
+        const sendingNames = asRelay.sendingNodeIds.map(id => {
+            const node = mapData.nodes.find(n => n.id === id);
+            return node ? node.shortName : id.slice(-4);
+        }).join(', ');
+
+        return {
+            role: 'relay',
+            nodeCount: asRelay.sendingNodeIds.length,
+            nodeNames: sendingNames
+        };
+    }
+
+    // Check if this node is reached indirectly through relays
+    const asSource = mapData.indirectCoverage.filter(c => c.sendingNodeIds.includes(nodeId));
+    if (asSource.length > 0) {
+        const relayNames = asSource.map(c => {
+            const node = mapData.nodes.find(n => n.id === c.relayNodeId);
+            return node ? node.shortName : c.relayNodeId.slice(-4);
+        }).join(', ');
+
+        return {
+            role: 'sending',
+            nodeCount: asSource.length,
+            nodeNames: relayNames
+        };
+    }
+
+    return null;
 }
 
 // Close details panel
@@ -525,6 +699,7 @@ function closeDetailsPanel() {
     const panel = document.getElementById('details-panel');
     panel.classList.remove('open');
     selectedNode = null;
+    deselectAllShapes();
 }
 
 // Get battery color
