@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MeshLink Node Tracking</title>
+    <title id="page-title">Node Tracking</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="css/nodes.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>MeshLink Node Tracking</h1>
+            <h1 id="page-header">Node Tracking</h1>
             <div class="stats-bar">
                 <div class="stat">
                     <span class="stat-label">Total Nodes:</span>
@@ -128,5 +128,13 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="js/nodes.js"></script>
+    <script>
+        fetch('/api/site-config').then(r => r.json()).then(data => {
+            if (data.success && data.botName) {
+                document.getElementById('page-title').textContent = data.botName + ' Node Tracking';
+                document.getElementById('page-header').textContent = data.botName + ' Node Tracking';
+            }
+        }).catch(() => {});
+    </script>
 </body>
 </html>

@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MeshLink Node Connections</title>
+    <title id="page-title">Node Connections</title>
     <link rel="stylesheet" href="css/nodes.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>🔗 MeshLink Node Connections</h1>
+            <h1 id="page-header">Node Connections</h1>
             <div class="stats-bar">
                 <div class="stat">
                     <span class="stat-label">Total Nodes:</span>
@@ -27,19 +27,21 @@
         </header>
 
         <nav class="tab-nav">
-            <a href="/" class="tab-btn">📋 Node List</a>
-            <a href="/traceroutes.html" class="tab-btn">🛤️ Traceroutes</a>
+            <a href="/nodes.html" class="tab-btn">Nodes</a>
+            <a href="/map.html" class="tab-btn">Map</a>
+            <a href="/traceroutes.html" class="tab-btn">Traceroutes</a>
+            <a href="/telemetry.html" class="tab-btn">Telemetry</a>
         </nav>
 
         <div class="tab-content active">
             <div class="controls">
-                <input type="text" id="search" placeholder="🔍 Search nodes..." class="search-box">
+                <input type="text" id="search" placeholder="Search nodes..." class="search-box">
                 <select id="filter-connections" class="filter-select">
                     <option value="">All Nodes</option>
                     <option value="connected">Connected Only</option>
                     <option value="isolated">Isolated Nodes</option>
                 </select>
-                <button id="refresh-btn" class="refresh-btn">🔄 Refresh</button>
+                <button id="refresh-btn" class="refresh-btn">Refresh</button>
             </div>
 
             <div id="connections-container" class="connections-container">
@@ -49,5 +51,13 @@
     </div>
 
     <script src="js/connections.js"></script>
+    <script>
+        fetch('/api/site-config').then(r => r.json()).then(data => {
+            if (data.success && data.botName) {
+                document.getElementById('page-title').textContent = data.botName + ' Node Connections';
+                document.getElementById('page-header').textContent = data.botName + ' Node Connections';
+            }
+        }).catch(() => {});
+    </script>
 </body>
 </html>

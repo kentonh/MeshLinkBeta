@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MeshLink Traceroutes</title>
+    <title id="page-title">Traceroutes</title>
     <link rel="stylesheet" href="css/nodes.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>MeshLink Traceroutes</h1>
+            <h1 id="page-header">Traceroutes</h1>
             <div class="stats-bar">
                 <div class="stat">
                     <span class="stat-label">Total Traceroutes:</span>
@@ -69,5 +69,13 @@
     </div>
 
     <script src="js/traceroutes.js"></script>
+    <script>
+        fetch('/api/site-config').then(r => r.json()).then(data => {
+            if (data.success && data.botName) {
+                document.getElementById('page-title').textContent = data.botName + ' Traceroutes';
+                document.getElementById('page-header').textContent = data.botName + ' Traceroutes';
+            }
+        }).catch(() => {});
+    </script>
 </body>
 </html>

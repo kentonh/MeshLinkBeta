@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MeshLink Telemetry Requests</title>
+    <title id="page-title">Telemetry Requests</title>
     <link rel="stylesheet" href="css/nodes.css">
     <style>
         .status-badge {
@@ -37,7 +37,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>MeshLink Telemetry Requests</h1>
+            <h1 id="page-header">Telemetry Requests</h1>
             <div class="stats-bar">
                 <div class="stat">
                     <span class="stat-label">Total Requests:</span>
@@ -112,5 +112,13 @@
     </div>
 
     <script src="js/telemetry.js"></script>
+    <script>
+        fetch('/api/site-config').then(r => r.json()).then(data => {
+            if (data.success && data.botName) {
+                document.getElementById('page-title').textContent = data.botName + ' Telemetry Requests';
+                document.getElementById('page-header').textContent = data.botName + ' Telemetry Requests';
+            }
+        }).catch(() => {});
+    </script>
 </body>
 </html>
