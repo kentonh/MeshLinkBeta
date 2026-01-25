@@ -1,5 +1,8 @@
 # Read each setting carefully and modify to your needs
 
+### GENERAL
+bot_name: "MeshLink" # Name displayed in startup messages and replies
+
 ### UPDATES
 rev: 23 # increment after update!
 ignore_update_prompt: False # set this to True if you do not want to answer y/n every time there is an update (set to True if using auto restart/startup)

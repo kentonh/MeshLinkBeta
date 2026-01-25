@@ -57,7 +57,8 @@ class basicEvents(plugins.Base):
             is_ignored_channel = send_channel in ignored_channels
 
             if text.lower() == "meshlink" and not is_ignored_channel:
-                LibMesh.sendReply("fl0v is running " + str(cfg.config["rev"]) + "\n\nuse " + cfg.config["prefix"] + "info for a list of commands", interface, packet)
+                bot_name = cfg.config.get("bot_name", "MeshLink")
+                LibMesh.sendReply(bot_name + " is running " + str(cfg.config["rev"]) + "\n\nuse " + cfg.config["prefix"] + "info for a list of commands", interface, packet)
 
             # Only send to Discord if not from ignored channels
             if not is_ignored_channel:
@@ -97,9 +98,10 @@ class basicEvents(plugins.Base):
         logger.infogreen("Node connected")
 
 
-        DiscordUtil.send_msg("fl0v is running "+str(cfg.config["rev"]), client, cfg.config)
+        bot_name = cfg.config.get("bot_name", "MeshLink")
+        DiscordUtil.send_msg(bot_name + " is running "+str(cfg.config["rev"]), client, cfg.config)
         if(cfg.config["send_start_stop"]):
-            interface.sendText("fl0v is running "+str(cfg.config["rev"])+"\n\nuse "+cfg.config["prefix"]+"info for a list of commands",channelIndex = cfg.config["send_channel_index"])
+            interface.sendText(bot_name + " is running "+str(cfg.config["rev"])+"\n\nuse "+cfg.config["prefix"]+"info for a list of commands",channelIndex = cfg.config["send_channel_index"])
 
     def onDisconnect(self,interface,client):
         logger.warn("Connection to node has been lost - attemping to reconnect")

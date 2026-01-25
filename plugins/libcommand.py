@@ -49,7 +49,8 @@ class simpleCommand():
                         LibMesh.sendReply(reply, interface, packet)
 
                         if(cfg.config["send_mesh_commands_to_discord"]):
-                                DiscordUtil.send_embed("fl0v reply", reply, client, cfg.config, color=0x6bc19b)
+                                bot_name = cfg.config.get("bot_name", "MeshLink")
+                                DiscordUtil.send_embed(bot_name + " reply", reply, client, cfg.config, color=0x6bc19b)
                     
     
     def executeCommand(self, packet, interface, client, args):

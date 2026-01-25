@@ -67,6 +67,15 @@ class NodeWebServer(plugins.Base):
         CORS(self.app)  # Enable CORS for API access
         
         # Define routes
+        @self.app.route('/api/site-config')
+        def get_site_config():
+            """Get site configuration for web pages"""
+            bot_name = cfg.config.get("bot_name", "MeshLink")
+            return jsonify({
+                'success': True,
+                'botName': bot_name
+            })
+
         @self.app.route('/')
         def index():
             """Serve main page"""
