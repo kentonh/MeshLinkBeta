@@ -4,12 +4,12 @@
 bot_name: "MeshLink" # Name displayed in startup messages and replies
 
 ### UPDATES
-rev: 23 # increment after update!
+rev: 24 # increment after update!
 ignore_update_prompt: False # set this to True if you do not want to answer y/n every time there is an update (set to True if using auto restart/startup)
 check_for_updates: True # set to False to disable update checking
 
 ### DISCORD SETTINGS
-use_discord: True
+use_discord: False
 max_message_length: 200 # max discord -> mesh message length and info message length
 info_channel_ids: [ 1234567890 ] # separate using commas
 message_channel_ids: [ 1234567890 ]
@@ -65,10 +65,11 @@ node_tracking:
     - "NODEINFO_APP"                     # Node information updates
     - "TELEMETRY_APP"                    # Battery, temperature, sensor data
     - "ROUTING_APP"                      # Routing information
+    - "TRACEROUTE_APP"                   # connection information
   
   # Network topology tracking settings
   topology:
-    enabled: true                         # Enable topology tracking (which nodes can hear each other)
+    enabled: false                         # Enable topology tracking (which nodes can hear each other)
     link_timeout_minutes: 60             # Mark links inactive after this many minutes without packets
     min_packets_for_link: 3              # Minimum packets required to establish valid link
     calculate_link_quality: true          # Calculate link quality scores based on SNR/RSSI
@@ -77,11 +78,11 @@ node_tracking:
   auto_traceroute:
     enabled: false                        # Enable automatic traceroute sending
     interval_minutes: 30                  # How often to check and send traceroutes
-    traceroute_age_hours: 4               # Send traceroute if last one older than this
-    active_threshold_minutes: 60          # Node must be seen within this time to be "active"
-    hop_limit: 7                          # Maximum hops for traceroute
+    traceroute_age_hours: 24              # Send traceroute if last one older than this
+    active_threshold_minutes: 180         # Node must be seen within this time to be "active" Node default is 3 hours
+    hop_limit: 3                          # Maximum hops for traceroute
     max_per_cycle: 5                      # Max traceroutes per check cycle
-    delay_seconds: 10                     # Delay between sending each traceroute
+    delay_seconds: 35                     # Delay between sending each traceroute
     exclude_mqtt_nodes: true              # Don't traceroute MQTT-only nodes
 
   # Automatic telemetry request configuration (for coverage testing)
@@ -89,29 +90,29 @@ node_tracking:
   auto_telemetry:
     enabled: false                        # Enable automatic telemetry requests
     interval_minutes: 15                  # How often to check and send requests
-    request_age_hours: 2                  # Send request if last successful one older than this
-    active_threshold_minutes: 120         # Node must be seen within this time to be "active"
+    request_age_hours: 3                  # Send request if last successful one older than this
+    active_threshold_minutes: 180         # Node must be seen within this time to be "active"
     max_per_cycle: 10                     # Max requests per check cycle
-    delay_seconds: 5                      # Delay between sending each request
+    delay_seconds: 10                     # Delay between sending each request
     exclude_mqtt_nodes: true              # Don't request from MQTT-only nodes
-    skip_nodes_with_recent_traceroute: true  # Skip nodes that have successful traceroutes
+    skip_nodes_with_recent_traceroute: true  # Skip nodes that have successful traceroutes. Traceroutes are better than telemetry. 
 
   # Battery monitoring alerts (optional)
   battery_alerts:
-    enabled: false                        # Enable battery alerts
+    enabled: false                       # Enable battery alerts
     low_battery_threshold: 20            # Alert when battery drops below this percentage
     critical_battery_threshold: 10       # Critical battery alert threshold
 
 ### FEDERATED UPLOADER PLUGIN
-# Uploads packet data and node database to MeshMonitor for centralized tracking
+# Uploads packet data and node database for centralized tracking
 # Provides two upload strategies:
 #   1. Real-time packet capture: Queues packets to outbox, uploaded by separate uploader service
-#   2. Periodic database export: Background thread exports nodes.db data directly to MeshMonitor
+#   2. Periodic database export: Background thread exports nodes.db data directly to central databasse
 federated_uploader:
-  enabled: false                         # Set to true to enable uploading to MeshMonitor
+  enabled: false                         # Set to true to enable uploading to central databasse
   collector_id: "!ffffff"  # Unique node ID for this collector node
-  api_url: "http://localhost:5000"       # MeshMonitor API URL (update to your server's address)
-  token: ""                              # Not used for MeshMonitor (kept for compatibility)
+  api_url: "http://localhost:5000"       # API URL (update to your server's address)
+  token: ""                              # Not used for (kept for compatibility)
 
   # Real-time packet capture (queued to outbox, uploaded by separate uploader service)
   outbox_db_path: "./federated_outbox.sqlite"  # Path to outbox database
