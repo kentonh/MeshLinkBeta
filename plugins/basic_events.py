@@ -101,7 +101,10 @@ class basicEvents(plugins.Base):
         bot_name = cfg.config.get("bot_name", "MeshLink")
         DiscordUtil.send_msg(bot_name + " is running "+str(cfg.config["rev"]), client, cfg.config)
         if(cfg.config["send_start_stop"]):
-            interface.sendText(bot_name + " is running "+str(cfg.config["rev"])+"\n\nuse "+cfg.config["prefix"]+"info for a list of commands",channelIndex = cfg.config["send_channel_index"])
+            try:
+                interface.sendText(bot_name + " is running "+str(cfg.config["rev"])+"\n\nuse "+cfg.config["prefix"]+"info for a list of commands",channelIndex = cfg.config["send_channel_index"])
+            except Exception as e:
+                logger.warn(f"Failed to send startup message: {e}")
 
     def onDisconnect(self,interface,client):
         logger.warn("Connection to node has been lost - attemping to reconnect")

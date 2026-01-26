@@ -1,4 +1,5 @@
 import cfg
+import plugins.liblogger as logger
 
 def getUserLong(interface,packet):
     ret=None
@@ -42,16 +43,27 @@ def getPosition(interface,packet):
     return lat, long, hasPos
 
 
-def sendReply(text, interface, packet, channelIndex = -1):
+def sendReply(text, interface, packet, channelIndex = -1, retries = 2):
     ret = packet
 
     if(channelIndex == -1):
         channelIndex = cfg.config["send_channel_index"]
-        
+
     to = 4294967295 # ^all
 
     if(packet["to"] == interface.localNode.nodeNum):
          to = packet["from"]
-    interface.sendText(text=text,destinationId=to,channelIndex=channelIndex)
+
+    for attempt in range(retries + 1):
+        try:
+            interface.sendText(text=text,destinationId=to,channelIndex=channelIndex)
+            return ret
+        except Exception as e:
+            if attempt < retries:
+                logger.warn(f"sendReply: attempt {attempt + 1} failed, retrying: {e}")
+                import time
+                time.sleep(1)
+            else:
+                logger.warn(f"sendReply: failed after {retries + 1} attempts: {e}")
 
     return ret
