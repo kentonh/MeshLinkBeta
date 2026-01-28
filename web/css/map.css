@@ -397,10 +397,35 @@ body {
     border-radius: 6px;
     font-weight: 500;
     transition: opacity 0.2s;
+    border: none;
+    cursor: pointer;
+    margin-bottom: 8px;
 }
 
 .action-btn:hover {
     opacity: 0.9;
+}
+
+.action-btn.secondary-btn {
+    background: #6c757d;
+}
+
+.action-btn.ignore-btn {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+}
+
+/* Airplane marker styles */
+.airplane-marker {
+    background: transparent;
+    border: none;
+}
+
+.airplane-marker .airplane-emoji {
+    font-size: 24px;
+    display: block;
+    text-align: center;
+    line-height: 28px;
+    filter: drop-shadow(1px 1px 2px rgba(0, 0, 0, 0.3));
 }
 
 /* Popup Styles */

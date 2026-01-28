@@ -13,6 +13,9 @@ import plugins.liblogger as logger
 # Thread-local storage for database connections
 _thread_local = threading.local()
 
+# Airplane detection threshold: 1000 feet = 304.8 meters
+AIRPLANE_ALTITUDE_THRESHOLD_METERS = 305
+
 class NodeDatabase:
     """Manages SQLite database for node tracking"""
     
@@ -60,7 +63,9 @@ class NodeDatabase:
                     is_powered BOOLEAN,
                     last_battery_update_utc TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    is_ignored BOOLEAN DEFAULT 0,
+                    is_airplane BOOLEAN DEFAULT 0
                 )
             """)
             
@@ -183,7 +188,17 @@ class NodeDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_to_node ON telemetry_requests(to_node_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_status ON telemetry_requests(status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_requests(requested_at_utc)")
-            
+
+            # Migration: Add is_ignored and is_airplane columns if they don't exist
+            cursor.execute("PRAGMA table_info(nodes)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'is_ignored' not in columns:
+                cursor.execute("ALTER TABLE nodes ADD COLUMN is_ignored BOOLEAN DEFAULT 0")
+                logger.info("Added is_ignored column to nodes table")
+            if 'is_airplane' not in columns:
+                cursor.execute("ALTER TABLE nodes ADD COLUMN is_airplane BOOLEAN DEFAULT 0")
+                logger.info("Added is_airplane column to nodes table")
+
             conn.commit()
             logger.infogreen("Node tracking database initialized successfully")
             
@@ -208,13 +223,20 @@ class NodeDatabase:
                 # Update existing node
                 update_fields = []
                 update_values = []
-                
-                for field in ['node_num', 'short_name', 'long_name', 'latitude', 'longitude', 
+
+                for field in ['node_num', 'short_name', 'long_name', 'latitude', 'longitude',
                              'altitude', 'hardware_model', 'firmware_version', 'is_mqtt',
                              'battery_level', 'voltage', 'is_charging', 'is_powered']:
                     if field in node_data and node_data[field] is not None:
                         update_fields.append(f"{field} = ?")
                         update_values.append(node_data[field])
+
+                # Airplane detection: update is_airplane based on altitude
+                altitude = node_data.get('altitude')
+                if altitude is not None:
+                    is_airplane = 1 if altitude > AIRPLANE_ALTITUDE_THRESHOLD_METERS else 0
+                    update_fields.append("is_airplane = ?")
+                    update_values.append(is_airplane)
                 
                 # Always update these
                 update_fields.extend(['last_seen_utc = ?', 'updated_at = ?', 
@@ -1103,6 +1125,23 @@ class NodeDatabase:
         except Exception as e:
             logger.warn(f"Failed to get telemetry request stats: {e}")
             return {}
+
+    def set_node_ignored(self, node_id: str, ignored: bool) -> bool:
+        """Set or unset the ignored status for a node"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "UPDATE nodes SET is_ignored = ? WHERE node_id = ?",
+                (1 if ignored else 0, node_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+        except Exception as e:
+            logger.warn(f"Failed to set ignored status for {node_id}: {e}")
+            return False
 
     def close(self):
         """Close database connection"""

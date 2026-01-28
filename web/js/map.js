@@ -110,9 +110,17 @@ function renderMap() {
 
     clearMapLayers();
 
-    const nodes = mapData.nodes || [];
-    const directConnections = mapData.directConnections || [];
-    const indirectCoverage = mapData.indirectCoverage || [];
+    // Filter out ignored nodes
+    const ignoredIds = new Set((mapData.nodes || []).filter(n => n.isIgnored).map(n => n.id));
+    const nodes = (mapData.nodes || []).filter(node => !node.isIgnored);
+
+    // Filter connections involving ignored nodes
+    const directConnections = (mapData.directConnections || [])
+        .filter(c => !ignoredIds.has(c.from) && !ignoredIds.has(c.to));
+
+    // Filter indirect coverage involving ignored nodes
+    const indirectCoverage = (mapData.indirectCoverage || [])
+        .filter(c => !ignoredIds.has(c.relayNodeId));
 
     // Create node lookup
     const nodeById = {};
@@ -206,24 +214,45 @@ function getConnectionColor(rssi, snr) {
 
 // Create a node marker
 function createNodeMarker(node) {
-    const color = getNodeColor(node);
-    const radius = node.battery ? 5 + (node.battery / 20) : 8;
+    let marker;
 
-    const marker = L.circleMarker([node.position.lat, node.position.lon], {
-        radius: radius,
-        fillColor: color,
-        color: '#ffffff',
-        weight: 2,
-        opacity: 1,
-        fillOpacity: 0.85
-    }).addTo(map);
+    if (node.isAirplane) {
+        // Use airplane emoji marker
+        const icon = L.divIcon({
+            className: 'airplane-marker',
+            html: '<span class="airplane-emoji">✈️</span>',
+            iconSize: [28, 28],
+            iconAnchor: [14, 14]
+        });
+        marker = L.marker([node.position.lat, node.position.lon], { icon }).addTo(map);
 
-    // Tooltip with node name
-    marker.bindTooltip(node.shortName || node.name, {
-        permanent: false,
-        direction: 'top',
-        offset: [0, -radius]
-    });
+        // Tooltip with node name
+        marker.bindTooltip(node.shortName || node.name, {
+            permanent: false,
+            direction: 'top',
+            offset: [0, -14]
+        });
+    } else {
+        // Standard circle marker
+        const color = getNodeColor(node);
+        const radius = node.battery ? 5 + (node.battery / 20) : 8;
+
+        marker = L.circleMarker([node.position.lat, node.position.lon], {
+            radius: radius,
+            fillColor: color,
+            color: '#ffffff',
+            weight: 2,
+            opacity: 1,
+            fillOpacity: 0.85
+        }).addTo(map);
+
+        // Tooltip with node name
+        marker.bindTooltip(node.shortName || node.name, {
+            permanent: false,
+            direction: 'top',
+            offset: [0, -radius]
+        });
+    }
 
     // Click handler
     marker.on('click', function(e) {
@@ -242,10 +271,11 @@ function createNodeMarker(node) {
 function createNodePopup(node) {
     const lastHeard = node.lastHeard ? formatRelativeTime(node.lastHeard) : 'Unknown';
     const batteryStr = node.battery !== null ? `${node.battery}%` : 'N/A';
+    const airplaneIndicator = node.isAirplane ? ' ✈️' : '';
 
     return `
         <div class="popup-content">
-            <div class="popup-title">${escapeHtml(node.name)}</div>
+            <div class="popup-title">${escapeHtml(node.name)}${airplaneIndicator}</div>
             <div class="popup-id">${escapeHtml(node.id)}</div>
             <div class="popup-details">
                 <div class="popup-row">
@@ -264,6 +294,12 @@ function createNodePopup(node) {
                     <span class="popup-label">Position:</span>
                     <span>${node.position.lat.toFixed(5)}, ${node.position.lon.toFixed(5)}</span>
                 </div>
+                ${node.isAirplane ? `
+                <div class="popup-row">
+                    <span class="popup-label">Status:</span>
+                    <span>Airplane (high altitude)</span>
+                </div>
+                ` : ''}
             </div>
             <button class="popup-btn" onclick="showNodeDetails(mapData.nodes.find(n => n.id === '${node.id}'))">
                 View Details
@@ -530,6 +566,12 @@ function showNodeDetails(node) {
                 </span>
             </div>
             ` : ''}
+            ${node.isAirplane ? `
+            <div class="detail-row">
+                <span class="detail-label">Type:</span>
+                <span class="detail-value">✈️ Airplane (high altitude)</span>
+            </div>
+            ` : ''}
         </div>
 
         <div class="detail-section">
@@ -599,11 +641,39 @@ function showNodeDetails(node) {
         ` : ''}
 
         <div class="detail-actions">
-            <a href="/nodes.html?node=${encodeURIComponent(node.id)}" class="action-btn">View Full Details</a>
+            <button class="action-btn ignore-btn" onclick="toggleIgnoreNode('${node.id}')">
+                ${node.isIgnored ? 'Show on Map' : 'Hide from Map'}
+            </button>
+            <a href="/nodes.html?node=${encodeURIComponent(node.id)}" class="action-btn secondary-btn">View Full Details</a>
         </div>
     `;
 
     panel.classList.add('open');
+}
+
+// Toggle ignore status for a node
+async function toggleIgnoreNode(nodeId) {
+    const node = mapData.nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    const method = node.isIgnored ? 'DELETE' : 'POST';
+
+    try {
+        const response = await fetch(`${API_BASE}/api/nodes/${encodeURIComponent(nodeId)}/ignore`, {
+            method: method
+        });
+        const data = await response.json();
+
+        if (data.success) {
+            // Refresh map data
+            loadMapData();
+            closeDetailsPanel();
+        } else {
+            console.error('Failed to toggle ignore status:', data.error);
+        }
+    } catch (error) {
+        console.error('Error toggling ignore status:', error);
+    }
 }
 
 // Highlight shapes related to a node

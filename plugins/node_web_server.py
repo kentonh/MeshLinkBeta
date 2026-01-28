@@ -430,6 +430,29 @@ class NodeWebServer(plugins.Base):
                     'error': str(e)
                 }), 500
 
+        @self.app.route('/api/nodes/<node_id>/ignore', methods=['POST', 'DELETE'])
+        def toggle_node_ignore(node_id):
+            """Set or unset ignored status for a node"""
+            try:
+                ignored = request.method == 'POST'
+                success = self.db.set_node_ignored(node_id, ignored)
+                if success:
+                    return jsonify({
+                        'success': True,
+                        'node_id': node_id,
+                        'is_ignored': ignored
+                    })
+                else:
+                    return jsonify({
+                        'success': False,
+                        'error': 'Node not found'
+                    }), 404
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+
         @self.app.route('/api/map-data', methods=['GET'])
         def get_map_data():
             """Get connection data for coverage map based on connection-logic.md specs"""
@@ -465,7 +488,9 @@ class NodeWebServer(plugins.Base):
                             'lastHeard': node.get('last_seen_utc'),
                             'totalPackets': node.get('total_packets_received', 0),
                             'isMqtt': node.get('is_mqtt', False),
-                            'directLinkCount': 0
+                            'directLinkCount': 0,
+                            'isIgnored': bool(node.get('is_ignored', False)),
+                            'isAirplane': bool(node.get('is_airplane', False))
                         }
                         nodes_with_gps.append(node_data)
                         node_lookup[node['node_id']] = node_data
