@@ -9,6 +9,7 @@ let mapData = null;
 let nodeMarkers = [];
 let directConnectionLines = [];
 let indirectCoverageShapes = [];
+let overallCoverageHull = null;
 let selectedNode = null;
 let selectedShape = null;
 let timeWindow = 24;
@@ -128,7 +129,10 @@ function renderMap() {
         nodeById[node.id] = node;
     });
 
-    // Draw indirect coverage shapes first (under everything)
+    // Draw overall coverage hull first (underneath everything)
+    drawOverallCoverageHull(nodes);
+
+    // Draw indirect coverage shapes (under connections and nodes)
     // Shape centered on RELAY node, edges defined by SENDING nodes
     indirectCoverage.forEach(coverage => {
         const relayNode = nodeById[coverage.relayNodeId];
@@ -165,6 +169,10 @@ function clearMapLayers() {
     nodeMarkers.forEach(marker => marker.remove());
     directConnectionLines.forEach(line => line.remove());
     indirectCoverageShapes.forEach(shape => shape.remove());
+    if (overallCoverageHull) {
+        overallCoverageHull.remove();
+        overallCoverageHull = null;
+    }
 
     nodeMarkers = [];
     directConnectionLines = [];
@@ -254,10 +262,12 @@ function createNodeMarker(node) {
         });
     }
 
-    // Click handler
+    // Click handler - highlight connected lines, open popup
     marker.on('click', function(e) {
         L.DomEvent.stopPropagation(e);
-        showNodeDetails(node);
+        deselectAllShapes();
+        highlightNodeConnections(node.id);
+        marker.openPopup();
     });
 
     // Popup
@@ -321,13 +331,8 @@ function drawDirectConnection(fromNode, toNode, conn) {
         opacity: DEFAULT_OPACITY
     }).addTo(map);
 
-    // Click handler to highlight
-    line.on('click', function(e) {
-        L.DomEvent.stopPropagation(e);
-        deselectAllShapes();
-        line.setStyle({ opacity: SELECTED_OPACITY });
-        selectedShape = line;
-    });
+    // Store connection data for highlighting
+    line._connData = { from: conn.from, to: conn.to };
 
     // Popup with connection info
     const rssiStr = conn.rssi !== null ? `${conn.rssi.toFixed(1)} dBm` : 'N/A';
@@ -448,6 +453,27 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
     `);
 
     return shape;
+}
+
+// Draw overall coverage hull encompassing all nodes
+function drawOverallCoverageHull(nodes) {
+    if (nodes.length < 3) return;
+
+    // Collect all node positions
+    const allPoints = nodes.map(node => [node.position.lat, node.position.lon]);
+
+    // Compute convex hull
+    const hullPoints = convexHull(allPoints);
+
+    if (hullPoints.length < 3) return;
+
+    overallCoverageHull = L.polygon(hullPoints, {
+        color: '#888888',
+        fillColor: '#888888',
+        opacity: 0.2,
+        fillOpacity: 0.2,
+        weight: 1
+    }).addTo(map);
 }
 
 // Compute convex hull of a set of points using monotone chain algorithm
@@ -671,22 +697,22 @@ async function toggleIgnoreNode(nodeId) {
     }
 }
 
-// Highlight shapes related to a node
+// Highlight connections for a node (only direct connection lines)
+function highlightNodeConnections(nodeId) {
+    // Highlight direct connections involving this node
+    directConnectionLines.forEach(line => {
+        if (line._connData && (line._connData.from === nodeId || line._connData.to === nodeId)) {
+            line.setStyle({ opacity: SELECTED_OPACITY });
+        }
+    });
+}
+
+// Highlight shapes related to a node (used by details panel)
 function highlightNodeShapes(nodeId) {
     deselectAllShapes();
+    highlightNodeConnections(nodeId);
 
-    // Highlight direct connections involving this node
-    if (mapData && mapData.directConnections) {
-        mapData.directConnections.forEach((conn, index) => {
-            if (conn.from === nodeId || conn.to === nodeId) {
-                if (directConnectionLines[index]) {
-                    directConnectionLines[index].setStyle({ opacity: SELECTED_OPACITY });
-                }
-            }
-        });
-    }
-
-    // Highlight indirect coverage shapes for this node (as relay or sending)
+    // Also highlight indirect coverage shapes for this node (as relay or sending)
     if (mapData && mapData.indirectCoverage) {
         mapData.indirectCoverage.forEach((coverage, index) => {
             if (coverage.relayNodeId === nodeId || coverage.sendingNodeIds.includes(nodeId)) {
