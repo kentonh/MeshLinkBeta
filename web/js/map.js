@@ -450,51 +450,47 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
     return shape;
 }
 
-// Compute convex hull of a set of points using Graham scan algorithm
+// Compute convex hull of a set of points using monotone chain algorithm
 // Points are [lat, lon] arrays
-function convexHull(points) {
+function convexHull(inputPoints) {
+    // Make a copy to avoid modifying the original
+    const points = inputPoints.map(p => [...p]);
+
     if (points.length < 3) return points;
 
-    // Find the point with lowest lat (and lowest lon if tied)
-    let start = 0;
-    for (let i = 1; i < points.length; i++) {
-        if (points[i][0] < points[start][0] ||
-            (points[i][0] === points[start][0] && points[i][1] < points[start][1])) {
-            start = i;
-        }
-    }
+    // Sort points by lat, then by lon
+    points.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 
-    // Swap start point to index 0
-    [points[0], points[start]] = [points[start], points[0]];
-    const pivot = points[0];
-
-    // Sort remaining points by polar angle with respect to pivot
-    const sorted = points.slice(1).sort((a, b) => {
-        const angleA = Math.atan2(a[0] - pivot[0], a[1] - pivot[1]);
-        const angleB = Math.atan2(b[0] - pivot[0], b[1] - pivot[1]);
-        if (angleA !== angleB) return angleA - angleB;
-        // If same angle, closer point comes first
-        const distA = (a[0] - pivot[0]) ** 2 + (a[1] - pivot[1]) ** 2;
-        const distB = (b[0] - pivot[0]) ** 2 + (b[1] - pivot[1]) ** 2;
-        return distA - distB;
-    });
-
-    // Cross product to determine turn direction
+    // Cross product of vectors OA and OB where O is origin
     function cross(o, a, b) {
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+        return (a[1] - o[1]) * (b[0] - o[0]) - (a[0] - o[0]) * (b[1] - o[1]);
     }
 
-    // Build hull
-    const hull = [pivot];
-    for (const point of sorted) {
-        // Remove points that make clockwise turn
-        while (hull.length > 1 && cross(hull[hull.length - 2], hull[hull.length - 1], point) <= 0) {
-            hull.pop();
+    // Build lower hull
+    const lower = [];
+    for (const p of points) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+            lower.pop();
         }
-        hull.push(point);
+        lower.push(p);
     }
 
-    return hull;
+    // Build upper hull
+    const upper = [];
+    for (let i = points.length - 1; i >= 0; i--) {
+        const p = points[i];
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+            upper.pop();
+        }
+        upper.push(p);
+    }
+
+    // Remove last point of each half because it's repeated
+    lower.pop();
+    upper.pop();
+
+    // Concatenate to form full hull
+    return lower.concat(upper);
 }
 
 // Calculate distance between two points in meters (Haversine formula)
