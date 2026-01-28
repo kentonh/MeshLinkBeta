@@ -411,16 +411,11 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
         dashArray: '5, 10'
     }).addTo(map);
 
-    // Click handler to highlight
-    shape.on('click', function(e) {
-        L.DomEvent.stopPropagation(e);
-        deselectAllShapes();
-        shape.setStyle({
-            opacity: SELECTED_OPACITY,
-            fillOpacity: SELECTED_OPACITY
-        });
-        selectedShape = shape;
-    });
+    // Store coverage data for highlighting when node is clicked
+    shape._coverageData = {
+        relayNodeId: coverage.relayNodeId,
+        sendingNodeIds: coverage.sendingNodeIds
+    };
 
     const nodeNames = sendingNodes.map(n => n.shortName).join(', ');
 
@@ -697,12 +692,25 @@ async function toggleIgnoreNode(nodeId) {
     }
 }
 
-// Highlight connections for a node (only direct connection lines)
+// Highlight connections for a node (direct lines and indirect coverage shapes)
 function highlightNodeConnections(nodeId) {
     // Highlight direct connections involving this node
     directConnectionLines.forEach(line => {
         if (line._connData && (line._connData.from === nodeId || line._connData.to === nodeId)) {
             line.setStyle({ opacity: SELECTED_OPACITY });
+        }
+    });
+
+    // Highlight indirect coverage shapes involving this node
+    indirectCoverageShapes.forEach(shape => {
+        if (shape._coverageData) {
+            const data = shape._coverageData;
+            if (data.relayNodeId === nodeId || data.sendingNodeIds.includes(nodeId)) {
+                shape.setStyle({
+                    opacity: SELECTED_OPACITY,
+                    fillOpacity: SELECTED_OPACITY
+                });
+            }
         }
     });
 }
