@@ -14,7 +14,7 @@ import plugins.liblogger as logger
 _thread_local = threading.local()
 
 # Airplane detection threshold: 1000 feet = 304.8 meters
-AIRPLANE_ALTITUDE_THRESHOLD_METERS = 305
+AIRPLANE_ALTITUDE_THRESHOLD_METERS = 750
 
 class NodeDatabase:
     """Manages SQLite database for node tracking"""

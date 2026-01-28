@@ -361,9 +361,9 @@ function drawDirectConnection(fromNode, toNode, conn) {
     return line;
 }
 
-// Draw indirect coverage shape (ellipse)
-// relayNode is the CENTER of the shape
-// sendingNodes define the boundary (up to 4 farthest nodes)
+// Draw indirect coverage shape (convex hull)
+// relayNode is included in the shape
+// sendingNodes define the boundary
 function drawIndirectCoverage(relayNode, coverage, nodeById) {
     const sendingNodes = coverage.sendingNodeIds
         .map(id => nodeById[id])
@@ -374,20 +374,30 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
     const relayLat = relayNode.position.lat;
     const relayLon = relayNode.position.lon;
 
-    // Calculate distances from relay to each sending node
-    const nodesWithDistance = sendingNodes.map(node => ({
-        node: node,
-        distance: calculateDistance(relayLat, relayLon, node.position.lat, node.position.lon)
-    }));
+    // Collect all points: relay node + all sending nodes
+    const allPoints = [
+        [relayLat, relayLon]
+    ];
+    sendingNodes.forEach(node => {
+        allPoints.push([node.position.lat, node.position.lon]);
+    });
 
-    // Sort by distance (farthest first) and take up to 4
-    nodesWithDistance.sort((a, b) => b.distance - a.distance);
-    const farthestNodes = nodesWithDistance.slice(0, 4);
+    // Calculate max distance for popup
+    let maxDistance = 0;
+    sendingNodes.forEach(node => {
+        const dist = calculateDistance(relayLat, relayLon, node.position.lat, node.position.lon);
+        if (dist > maxDistance) maxDistance = dist;
+    });
 
-    // Create ellipse based on farthest nodes
-    const ellipse = createEllipse(relayLat, relayLon, farthestNodes);
+    // Compute convex hull of all points
+    const hullPoints = convexHull(allPoints);
 
-    const shape = L.polygon(ellipse.points, {
+    if (hullPoints.length < 3) {
+        // Not enough points for a polygon, skip
+        return null;
+    }
+
+    const shape = L.polygon(hullPoints, {
         color: 'rgba(102, 126, 234, 0.8)',
         fillColor: 'rgba(102, 126, 234, 0.4)',
         opacity: DEFAULT_OPACITY,
@@ -407,7 +417,7 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
         selectedShape = shape;
     });
 
-    const farthestNames = farthestNodes.map(n => n.node.shortName).join(', ');
+    const nodeNames = sendingNodes.map(n => n.shortName).join(', ');
 
     shape.bindPopup(`
         <div class="popup-content">
@@ -422,12 +432,12 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
                     <span>${sendingNodes.length}</span>
                 </div>
                 <div class="popup-row">
-                    <span class="popup-label">Farthest Nodes:</span>
-                    <span>${escapeHtml(farthestNames)}</span>
+                    <span class="popup-label">Nodes:</span>
+                    <span>${escapeHtml(nodeNames)}</span>
                 </div>
                 <div class="popup-row">
                     <span class="popup-label">Max Range:</span>
-                    <span>${(ellipse.semiMajor / 1000).toFixed(2)} km</span>
+                    <span>${(maxDistance / 1000).toFixed(2)} km</span>
                 </div>
                 <div class="popup-row">
                     <span class="popup-label">Hop Count:</span>
@@ -440,62 +450,51 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
     return shape;
 }
 
-// Create ellipse points from center and farthest nodes
-function createEllipse(centerLat, centerLon, farthestNodes) {
-    if (farthestNodes.length === 0) {
-        return { points: [], semiMajor: 0, semiMinor: 0 };
+// Compute convex hull of a set of points using Graham scan algorithm
+// Points are [lat, lon] arrays
+function convexHull(points) {
+    if (points.length < 3) return points;
+
+    // Find the point with lowest lat (and lowest lon if tied)
+    let start = 0;
+    for (let i = 1; i < points.length; i++) {
+        if (points[i][0] < points[start][0] ||
+            (points[i][0] === points[start][0] && points[i][1] < points[start][1])) {
+            start = i;
+        }
     }
 
-    // Calculate semi-major axis (farthest distance)
-    const semiMajor = farthestNodes[0].distance;
+    // Swap start point to index 0
+    [points[0], points[start]] = [points[start], points[0]];
+    const pivot = points[0];
 
-    // Calculate semi-minor axis
-    let semiMinor;
-    if (farthestNodes.length === 1) {
-        // Single node: make a circle
-        semiMinor = semiMajor;
-    } else if (farthestNodes.length === 2) {
-        // Two nodes: semi-minor is the shorter distance, or 70% of major if both similar
-        semiMinor = Math.min(farthestNodes[1].distance, semiMajor * 0.7);
-    } else {
-        // 3-4 nodes: use average of non-primary nodes for semi-minor
-        const otherDistances = farthestNodes.slice(1).map(n => n.distance);
-        semiMinor = otherDistances.reduce((a, b) => a + b, 0) / otherDistances.length;
+    // Sort remaining points by polar angle with respect to pivot
+    const sorted = points.slice(1).sort((a, b) => {
+        const angleA = Math.atan2(a[0] - pivot[0], a[1] - pivot[1]);
+        const angleB = Math.atan2(b[0] - pivot[0], b[1] - pivot[1]);
+        if (angleA !== angleB) return angleA - angleB;
+        // If same angle, closer point comes first
+        const distA = (a[0] - pivot[0]) ** 2 + (a[1] - pivot[1]) ** 2;
+        const distB = (b[0] - pivot[0]) ** 2 + (b[1] - pivot[1]) ** 2;
+        return distA - distB;
+    });
+
+    // Cross product to determine turn direction
+    function cross(o, a, b) {
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
     }
 
-    // Ensure semi-minor is at least 50% of semi-major for reasonable ellipse shape
-    semiMinor = Math.max(semiMinor, semiMajor * 0.5);
-
-    // Calculate rotation angle based on farthest node direction
-    const farthestNode = farthestNodes[0].node;
-    const rotation = Math.atan2(
-        farthestNode.position.lat - centerLat,
-        farthestNode.position.lon - centerLon
-    );
-
-    // Generate ellipse points (polygon approximation)
-    const numPoints = 64;
-    const points = [];
-
-    for (let i = 0; i < numPoints; i++) {
-        const angle = (2 * Math.PI * i) / numPoints;
-
-        // Ellipse parametric equations
-        const x = semiMajor * Math.cos(angle);
-        const y = semiMinor * Math.sin(angle);
-
-        // Rotate by the calculated angle
-        const rotatedX = x * Math.cos(rotation) - y * Math.sin(rotation);
-        const rotatedY = x * Math.sin(rotation) + y * Math.cos(rotation);
-
-        // Convert meters to lat/lon offset (approximate)
-        const latOffset = rotatedY / 111320; // meters to degrees latitude
-        const lonOffset = rotatedX / (111320 * Math.cos(centerLat * Math.PI / 180)); // meters to degrees longitude
-
-        points.push([centerLat + latOffset, centerLon + lonOffset]);
+    // Build hull
+    const hull = [pivot];
+    for (const point of sorted) {
+        // Remove points that make clockwise turn
+        while (hull.length > 1 && cross(hull[hull.length - 2], hull[hull.length - 1], point) <= 0) {
+            hull.pop();
+        }
+        hull.push(point);
     }
 
-    return { points, semiMajor, semiMinor };
+    return hull;
 }
 
 // Calculate distance between two points in meters (Haversine formula)
