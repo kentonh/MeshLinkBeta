@@ -1,6 +1,7 @@
 // Traceroutes page JavaScript
 
 let allTraceroutes = [];
+let currentSort = { key: 'received', direction: 'desc' };
 
 // Load and display traceroutes
 async function loadTraceroutes() {
@@ -29,6 +30,35 @@ function displayTraceroutes(traceroutes) {
         tbody.innerHTML = '<tr><td colspan="7" class="no-data">No traceroutes found</td></tr>';
         return;
     }
+
+    // Sort traceroutes
+    const dir = currentSort.direction === 'asc' ? 1 : -1;
+    traceroutes.sort((a, b) => {
+        let cmp;
+        switch (currentSort.key) {
+            case 'id':
+                return (a.id - b.id) * dir;
+            case 'from':
+                cmp = (a.from_long_name || a.from_short_name || a.from_node_id).localeCompare(b.from_long_name || b.from_short_name || b.from_node_id);
+                return cmp * dir;
+            case 'to':
+                cmp = (a.to_long_name || a.to_short_name || a.to_node_id || '').localeCompare(b.to_long_name || b.to_short_name || b.to_node_id || '');
+                return cmp * dir;
+            case 'hops':
+                return (a.hop_count - b.hop_count) * dir;
+            case 'signal': {
+                const aSnr = (a.snr_data && a.snr_data.length > 0) ? a.snr_data.reduce((s, v) => s + v, 0) / a.snr_data.length : null;
+                const bSnr = (b.snr_data && b.snr_data.length > 0) ? b.snr_data.reduce((s, v) => s + v, 0) / b.snr_data.length : null;
+                if (aSnr === null && bSnr === null) return 0;
+                if (aSnr === null) return 1;
+                if (bSnr === null) return -1;
+                return (aSnr - bSnr) * dir;
+            }
+            case 'received':
+            default:
+                return (new Date(a.received_at_utc || 0) - new Date(b.received_at_utc || 0)) * dir;
+        }
+    });
 
     tbody.innerHTML = traceroutes.map(trace => {
         const fromName = trace.from_long_name || trace.from_short_name || trace.from_node_id;
@@ -67,6 +97,7 @@ function displayTraceroutes(traceroutes) {
             </tr>
         `;
     }).join('');
+    updateSortableHeaders();
 }
 
 // Update statistics
@@ -128,10 +159,36 @@ function showError(message) {
     tbody.innerHTML = `<tr><td colspan="7" class="error">${message}</td></tr>`;
 }
 
+// Sortable Headers
+function initSortableHeaders() {
+    document.querySelectorAll('#traceroutes-table th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const sortKey = th.dataset.sort;
+            if (currentSort.key === sortKey) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.key = sortKey;
+                currentSort.direction = (sortKey === 'from' || sortKey === 'to') ? 'asc' : 'desc';
+            }
+            filterTraceroutes();
+        });
+    });
+}
+
+function updateSortableHeaders() {
+    document.querySelectorAll('#traceroutes-table th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.sort === currentSort.key) {
+            th.classList.add(currentSort.direction === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+}
+
 // Event listeners
 document.getElementById('refresh-btn').addEventListener('click', loadTraceroutes);
 document.getElementById('search').addEventListener('input', filterTraceroutes);
 document.getElementById('limit-select').addEventListener('change', loadTraceroutes);
+initSortableHeaders();
 
 // Initial load
 loadTraceroutes();

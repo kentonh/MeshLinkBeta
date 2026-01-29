@@ -2,6 +2,7 @@
 
 let allRequests = [];
 let currentFilter = 'all';
+let currentSort = { key: 'requested', direction: 'desc' };
 
 // Load and display telemetry requests
 async function loadTelemetryRequests() {
@@ -61,6 +62,49 @@ function displayRequests(requests) {
         return;
     }
 
+    // Sort requests
+    const dir = currentSort.direction === 'asc' ? 1 : -1;
+    requests.sort((a, b) => {
+        let cmp;
+        switch (currentSort.key) {
+            case 'id':
+                return (a.id - b.id) * dir;
+            case 'node':
+                cmp = (a.to_node_name || a.to_node_id || '').localeCompare(b.to_node_name || b.to_node_id || '');
+                return cmp * dir;
+            case 'status':
+                return (a.status || '').localeCompare(b.status || '') * dir;
+            case 'requested':
+                return (new Date(a.requested_at_utc || 0) - new Date(b.requested_at_utc || 0)) * dir;
+            case 'completed': {
+                const aVal = a.completed_at_utc ? new Date(a.completed_at_utc) : null;
+                const bVal = b.completed_at_utc ? new Date(b.completed_at_utc) : null;
+                if (aVal === null && bVal === null) return 0;
+                if (aVal === null) return 1;
+                if (bVal === null) return -1;
+                return (aVal - bVal) * dir;
+            }
+            case 'signal': {
+                const aSnr = a.rx_snr !== null && a.rx_snr !== undefined ? a.rx_snr : null;
+                const bSnr = b.rx_snr !== null && b.rx_snr !== undefined ? b.rx_snr : null;
+                if (aSnr === null && bSnr === null) return 0;
+                if (aSnr === null) return 1;
+                if (bSnr === null) return -1;
+                return (aSnr - bSnr) * dir;
+            }
+            case 'hops': {
+                const aHops = a.hops_away !== null && a.hops_away !== undefined ? a.hops_away : null;
+                const bHops = b.hops_away !== null && b.hops_away !== undefined ? b.hops_away : null;
+                if (aHops === null && bHops === null) return 0;
+                if (aHops === null) return 1;
+                if (bHops === null) return -1;
+                return (aHops - bHops) * dir;
+            }
+            default:
+                return 0;
+        }
+    });
+
     tbody.innerHTML = requests.map(req => {
         const nodeName = req.to_node_name || req.to_node_id;
 
@@ -117,6 +161,7 @@ function displayRequests(requests) {
             </tr>
         `;
     }).join('');
+    updateSortableHeaders();
 }
 
 // Update statistics
@@ -182,11 +227,37 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Sortable Headers
+function initSortableHeaders() {
+    document.querySelectorAll('#telemetry-table th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const sortKey = th.dataset.sort;
+            if (currentSort.key === sortKey) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.key = sortKey;
+                currentSort.direction = (sortKey === 'node' || sortKey === 'status') ? 'asc' : 'desc';
+            }
+            filterAndDisplay();
+        });
+    });
+}
+
+function updateSortableHeaders() {
+    document.querySelectorAll('#telemetry-table th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.sort === currentSort.key) {
+            th.classList.add(currentSort.direction === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
+    });
+}
+
 // Event listeners
 document.getElementById('refresh-btn').addEventListener('click', loadTelemetryRequests);
 document.getElementById('search').addEventListener('input', filterAndDisplay);
 document.getElementById('status-filter').addEventListener('change', filterAndDisplay);
 document.getElementById('limit-select').addEventListener('change', loadTelemetryRequests);
+initSortableHeaders();
 
 // Initial load
 loadTelemetryRequests();

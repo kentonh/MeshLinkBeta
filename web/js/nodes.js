@@ -9,7 +9,8 @@ let allTopology = [];
 let currentFilter = {
     search: '',
     battery: '',
-    sortBy: 'lastSeen'
+    sortBy: 'lastSeen',
+    sortDirection: 'desc'
 };
 let map = null;
 let mapMarkers = [];
@@ -84,8 +85,13 @@ function initializeControls() {
     // Sort
     document.getElementById('sort-by').addEventListener('change', (e) => {
         currentFilter.sortBy = e.target.value;
+        currentFilter.sortDirection = (e.target.value === 'name') ? 'asc' : 'desc';
+        updateSortableHeaders();
         renderNodes();
     });
+
+    // Sortable column headers
+    initSortableHeaders();
     
     // Refresh button
     document.getElementById('refresh-btn').addEventListener('click', () => {
@@ -98,6 +104,37 @@ function initializeControls() {
     document.getElementById('quality-filter')?.addEventListener('input', (e) => {
         document.getElementById('quality-value').textContent = e.target.value;
         renderTopology();
+    });
+}
+
+// Sortable Headers
+function initSortableHeaders() {
+    document.querySelectorAll('#nodes-table th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const sortKey = th.dataset.sort;
+            if (currentFilter.sortBy === sortKey) {
+                currentFilter.sortDirection = currentFilter.sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentFilter.sortBy = sortKey;
+                currentFilter.sortDirection = (sortKey === 'name' || sortKey === 'hardware') ? 'asc' : 'desc';
+            }
+            // Sync dropdown
+            const select = document.getElementById('sort-by');
+            if (select.querySelector(`option[value="${sortKey}"]`)) {
+                select.value = sortKey;
+            }
+            updateSortableHeaders();
+            renderNodes();
+        });
+    });
+}
+
+function updateSortableHeaders() {
+    document.querySelectorAll('#nodes-table th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.dataset.sort === currentFilter.sortBy) {
+            th.classList.add(currentFilter.sortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+        }
     });
 }
 
@@ -189,17 +226,26 @@ function renderNodes() {
     }
     
     // Sort nodes
+    const dir = currentFilter.sortDirection === 'asc' ? 1 : -1;
     filteredNodes.sort((a, b) => {
+        let cmp;
         switch(currentFilter.sortBy) {
             case 'name':
-                return (a.long_name || a.short_name || '').localeCompare(b.long_name || b.short_name || '');
+                cmp = (a.long_name || a.short_name || '').localeCompare(b.long_name || b.short_name || '');
+                return cmp * dir;
             case 'battery':
-                return (b.battery_level || 0) - (a.battery_level || 0);
+                cmp = (a.battery_level || 0) - (b.battery_level || 0);
+                return cmp * dir;
             case 'packets':
-                return (b.total_packets_received || 0) - (a.total_packets_received || 0);
+                cmp = (a.total_packets_received || 0) - (b.total_packets_received || 0);
+                return cmp * dir;
+            case 'hardware':
+                cmp = (a.hardware_model || '').localeCompare(b.hardware_model || '');
+                return cmp * dir;
             case 'lastSeen':
             default:
-                return new Date(b.last_seen_utc || 0) - new Date(a.last_seen_utc || 0);
+                cmp = new Date(a.last_seen_utc || 0) - new Date(b.last_seen_utc || 0);
+                return cmp * dir;
         }
     });
     
@@ -227,6 +273,7 @@ function renderNodes() {
             </td>
         </tr>
     `).join('');
+    updateSortableHeaders();
 }
 
 // Get Status Badge
