@@ -66,6 +66,7 @@ node_tracking:
     - "TELEMETRY_APP"                    # Battery, temperature, sensor data
     - "ROUTING_APP"                      # Routing information
     - "TRACEROUTE_APP"                   # connection information
+    - "NEIGHBORINFO_APP"                 # Neighbor info broadcasts (node-to-node links)
   
   # Network topology tracking settings
   topology:

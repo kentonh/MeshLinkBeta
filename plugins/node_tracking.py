@@ -151,6 +151,10 @@ class NodeTracking(plugins.Base):
             if portnum == 'TELEMETRY_APP':
                 self._process_telemetry_response(packet, interface)
 
+            # Process neighbor info broadcasts for topology
+            if portnum == 'NEIGHBORINFO_APP':
+                self._process_neighborinfo(packet, interface)
+
             # Auto-export if enabled
             if NodeTracking._config.get('auto_export_json', False):
                 current_time = time.time()
@@ -671,6 +675,51 @@ class NodeTracking(plugins.Base):
 
         except Exception as e:
             logger.warn(f"Error processing telemetry response: {e}")
+
+    def _process_neighborinfo(self, packet: Dict[str, Any], interface):
+        """Process NEIGHBORINFO_APP packets to update topology with neighbor links"""
+        try:
+            neighborinfo = packet.get('decoded', {}).get('neighborinfo', {})
+            if not neighborinfo:
+                return
+
+            from_id = packet.get('fromId')
+            if not from_id:
+                return
+
+            neighbors = neighborinfo.get('neighbors', [])
+            if not neighbors:
+                logger.info(f"Neighborinfo from {from_id}: no neighbors reported")
+                return
+
+            for neighbor in neighbors:
+                neighbor_num = neighbor.get('nodeId')
+                if not neighbor_num:
+                    continue
+
+                # Convert neighbor node number to node ID string
+                neighbor_id = None
+                if hasattr(interface, 'nodes') and interface.nodes:
+                    node_info = interface.nodes.get(neighbor_num)
+                    if node_info:
+                        neighbor_id = node_info.get('user', {}).get('id')
+
+                if not neighbor_id:
+                    neighbor_id = f"!{neighbor_num:08x}"
+
+                snr = neighbor.get('snr')
+
+                NodeTracking._db.update_topology(
+                    from_id,
+                    neighbor_id,
+                    snr=snr,
+                    hop_count=1
+                )
+
+            logger.info(f"Neighborinfo from {from_id}: updated {len(neighbors)} neighbor link(s)")
+
+        except Exception as e:
+            logger.warn(f"Error processing neighborinfo: {e}")
 
     def _export_data(self):
         """Export data to JSON"""
