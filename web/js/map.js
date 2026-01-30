@@ -115,13 +115,17 @@ function renderMap() {
     const ignoredIds = new Set((mapData.nodes || []).filter(n => n.isIgnored).map(n => n.id));
     const nodes = (mapData.nodes || []).filter(node => !node.isIgnored);
 
-    // Filter connections involving ignored nodes
-    const directConnections = (mapData.directConnections || [])
-        .filter(c => !ignoredIds.has(c.from) && !ignoredIds.has(c.to));
+    // Airplane nodes are shown as markers but excluded from shapes/connections
+    const airplaneIds = new Set(nodes.filter(n => n.isAirplane).map(n => n.id));
 
-    // Filter indirect coverage involving ignored nodes
+    // Filter connections involving ignored or airplane nodes
+    const directConnections = (mapData.directConnections || [])
+        .filter(c => !ignoredIds.has(c.from) && !ignoredIds.has(c.to)
+                   && !airplaneIds.has(c.from) && !airplaneIds.has(c.to));
+
+    // Filter indirect coverage involving ignored or airplane relay nodes
     const indirectCoverage = (mapData.indirectCoverage || [])
-        .filter(c => !ignoredIds.has(c.relayNodeId));
+        .filter(c => !ignoredIds.has(c.relayNodeId) && !airplaneIds.has(c.relayNodeId));
 
     // Create node lookup
     const nodeById = {};
@@ -129,15 +133,23 @@ function renderMap() {
         nodeById[node.id] = node;
     });
 
-    // Draw overall coverage hull first (underneath everything)
-    drawOverallCoverageHull(nodes);
+    // Non-airplane nodes for shape calculations
+    const shapeNodes = nodes.filter(n => !n.isAirplane);
+
+    // Draw overall coverage hull first (underneath everything), excluding airplanes
+    drawOverallCoverageHull(shapeNodes);
 
     // Draw indirect coverage shapes (under connections and nodes)
     // Shape centered on RELAY node, edges defined by SENDING nodes
+    // Exclude airplane nodes from sending node sets
     indirectCoverage.forEach(coverage => {
         const relayNode = nodeById[coverage.relayNodeId];
         if (relayNode) {
-            const shape = drawIndirectCoverage(relayNode, coverage, nodeById);
+            const filteredCoverage = {
+                ...coverage,
+                sendingNodeIds: coverage.sendingNodeIds.filter(id => !airplaneIds.has(id))
+            };
+            const shape = drawIndirectCoverage(relayNode, filteredCoverage, nodeById);
             if (shape) {
                 indirectCoverageShapes.push(shape);
             }
@@ -262,17 +274,24 @@ function createNodeMarker(node) {
         });
     }
 
-    // Click handler - highlight connected lines, open popup
+    // Click handler
     marker.on('click', function(e) {
         L.DomEvent.stopPropagation(e);
         deselectAllShapes();
-        highlightNodeConnections(node.id);
-        marker.openPopup();
+        if (node.isAirplane) {
+            // Airplane click goes straight to details panel (with hide option)
+            showNodeDetails(node);
+        } else {
+            highlightNodeConnections(node.id);
+            marker.openPopup();
+        }
     });
 
-    // Popup
-    const popupContent = createNodePopup(node);
-    marker.bindPopup(popupContent, { maxWidth: 300 });
+    // Popup (non-airplane nodes get a map popup; airplanes use details panel)
+    if (!node.isAirplane) {
+        const popupContent = createNodePopup(node);
+        marker.bindPopup(popupContent, { maxWidth: 300 });
+    }
 
     return marker;
 }
