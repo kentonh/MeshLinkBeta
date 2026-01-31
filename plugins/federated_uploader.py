@@ -418,7 +418,8 @@ class Plugin(Base):
                 f"{self.api_url}/api/ingest/meshlink",
                 json=payload,
                 headers={
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.token}",
                 },
                 timeout=60
             )

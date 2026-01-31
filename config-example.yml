@@ -111,9 +111,9 @@ node_tracking:
 #   2. Periodic database export: Background thread exports nodes.db data directly to central databasse
 federated_uploader:
   enabled: false                         # Set to true to enable uploading to central databasse
-  collector_id: "!ffffff"  # Unique node ID for this collector node
-  api_url: "http://localhost:5000"       # API URL (update to your server's address)
-  token: ""                              # Not used for (kept for compatibility)
+  collector_id: "my-collector"             # Unique ID for this collector (must match server token config)
+  api_url: "https://meshmerge.fly.dev"   # API URL of your meshlink-web instance
+  token: "your-secret-token-here"        # Bearer token for authentication (must match MESHLINK_INGEST_TOKENS on server)
 
   # Real-time packet capture (queued to outbox, uploaded by separate uploader service)
   outbox_db_path: "./federated_outbox.sqlite"  # Path to outbox database
