@@ -99,7 +99,7 @@ class basicEvents(plugins.Base):
 
 
         bot_name = cfg.config.get("bot_name", "MeshLink")
-        DiscordUtil.send_msg(bot_name + " is running "+str(cfg.config["rev"]), client, cfg.config)
+        # DiscordUtil.send_msg(bot_name + " is running "+str(cfg.config["rev"]), client, cfg.config)
         if(cfg.config["send_start_stop"]):
             try:
                 interface.sendText(bot_name + " is running "+str(cfg.config["rev"])+"\n\nuse "+cfg.config["prefix"]+"info for a list of commands",channelIndex = cfg.config["send_channel_index"])
