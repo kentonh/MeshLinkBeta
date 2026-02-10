@@ -189,7 +189,7 @@ class NodeDatabase:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_status ON telemetry_requests(status)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_requests(requested_at_utc)")
 
-            # Migration: Add is_ignored and is_airplane columns if they don't exist
+            # Migration: Add is_ignored, is_airplane, and last_name_update_utc columns if they don't exist
             cursor.execute("PRAGMA table_info(nodes)")
             columns = [row[1] for row in cursor.fetchall()]
             if 'is_ignored' not in columns:
@@ -198,6 +198,9 @@ class NodeDatabase:
             if 'is_airplane' not in columns:
                 cursor.execute("ALTER TABLE nodes ADD COLUMN is_airplane BOOLEAN DEFAULT 0")
                 logger.info("Added is_airplane column to nodes table")
+            if 'last_name_update_utc' not in columns:
+                cursor.execute("ALTER TABLE nodes ADD COLUMN last_name_update_utc TEXT")
+                logger.info("Added last_name_update_utc column to nodes table")
 
             conn.commit()
             logger.infogreen("Node tracking database initialized successfully")
@@ -224,12 +227,40 @@ class NodeDatabase:
                 update_fields = []
                 update_values = []
 
-                for field in ['node_num', 'short_name', 'long_name', 'latitude', 'longitude',
+                # Check if names should be updated (every 24 hours)
+                cursor.execute(
+                    "SELECT last_name_update_utc FROM nodes WHERE node_id = ?",
+                    (node_id,),
+                )
+                name_row = cursor.fetchone()
+                last_name_update = name_row["last_name_update_utc"] if name_row else None
+                should_update_names = True
+                if last_name_update:
+                    try:
+                        last_update_time = datetime.fromisoformat(last_name_update.replace("Z", "+00:00").replace("+00:00", ""))
+                        hours_since_update = (datetime.utcnow() - last_update_time).total_seconds() / 3600
+                        should_update_names = hours_since_update >= 24
+                    except (ValueError, TypeError):
+                        should_update_names = True
+
+                # Fields that always update if present
+                always_update_fields = ['node_num', 'latitude', 'longitude',
                              'altitude', 'hardware_model', 'firmware_version', 'is_mqtt',
-                             'battery_level', 'voltage', 'is_charging', 'is_powered']:
+                             'battery_level', 'voltage', 'is_charging', 'is_powered']
+
+                for field in always_update_fields:
                     if field in node_data and node_data[field] is not None:
                         update_fields.append(f"{field} = ?")
                         update_values.append(node_data[field])
+
+                # Names update only every 24 hours
+                if should_update_names:
+                    for field in ['short_name', 'long_name']:
+                        if field in node_data and node_data[field] is not None:
+                            update_fields.append(f"{field} = ?")
+                            update_values.append(node_data[field])
+                    update_fields.append("last_name_update_utc = ?")
+                    update_values.append(now)
 
                 # Airplane detection: update is_airplane based on altitude
                 altitude = node_data.get('altitude')
@@ -260,10 +291,11 @@ class NodeDatabase:
                 node_data['created_at'] = now
                 node_data['updated_at'] = now
                 node_data['total_packets_received'] = 1
-                
+                node_data['last_name_update_utc'] = now
+
                 if 'battery_level' in node_data and node_data['battery_level'] is not None:
                     node_data['last_battery_update_utc'] = now
-                
+
                 fields = list(node_data.keys())
                 placeholders = ','.join(['?' for _ in fields])
                 query = f"INSERT INTO nodes ({','.join(fields)}) VALUES ({placeholders})"
