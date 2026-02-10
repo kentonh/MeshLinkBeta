@@ -1,5 +1,6 @@
 import cfg
 import plugins.liblogger as logger
+from meshtastic import mesh_pb2, portnums_pb2
 
 def getUserLong(interface,packet):
     ret=None
@@ -54,9 +55,12 @@ def sendReply(text, interface, packet, channelIndex = -1, retries = 2):
     if(packet["to"] == interface.localNode.nodeNum):
          to = packet["from"]
 
+    # Get the original packet ID to use as reply_id
+    replyId = packet.get("id", 0)
+
     for attempt in range(retries + 1):
         try:
-            interface.sendText(text=text,destinationId=to,channelIndex=channelIndex)
+            sendTextWithReplyId(interface, text, to, channelIndex, replyId)
             return ret
         except Exception as e:
             if attempt < retries:
@@ -67,3 +71,14 @@ def sendReply(text, interface, packet, channelIndex = -1, retries = 2):
                 logger.warn(f"sendReply: failed after {retries + 1} attempts: {e}")
 
     return ret
+
+def sendTextWithReplyId(interface, text, destinationId, channelIndex, replyId):
+    """Send a text message with reply_id set to thread the message."""
+    meshPacket = mesh_pb2.MeshPacket()
+    meshPacket.channel = channelIndex
+    meshPacket.decoded.payload = text.encode("utf-8")
+    meshPacket.decoded.portnum = portnums_pb2.PortNum.TEXT_MESSAGE_APP
+    meshPacket.decoded.reply_id = replyId
+    meshPacket.id = interface._generatePacketId()
+
+    return interface._sendPacket(meshPacket, destinationId)

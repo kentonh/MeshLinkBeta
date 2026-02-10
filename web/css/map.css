@@ -83,6 +83,11 @@ body {
     background: rgba(255, 255, 255, 0.15);
 }
 
+/* Mobile navigation dropdown - hidden by default on desktop */
+.nav-dropdown-mobile {
+    display: none;
+}
+
 /* Stats Bar */
 .stats-bar {
     background: #f8f9fa;
@@ -492,6 +497,15 @@ body {
 
     .map-header h1 {
         font-size: 1.2em;
+    }
+
+    /* Hide desktop nav buttons, show mobile dropdown */
+    .nav-btn-desktop {
+        display: none;
+    }
+
+    .nav-dropdown-mobile {
+        display: block;
     }
 
     .stats-bar {

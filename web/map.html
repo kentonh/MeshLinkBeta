@@ -53,9 +53,15 @@
                     <option value="720">Last 30 Days</option>
                 </select>
                 <button id="refresh-btn" class="control-btn">Refresh</button>
-                <a href="/nodes.html" class="control-btn nav-btn">Nodes</a>
-                <a href="/traceroutes.html" class="control-btn nav-btn">Traceroutes</a>
-                <a href="/telemetry.html" class="control-btn nav-btn">Telemetry</a>
+                <a href="/nodes.html" class="control-btn nav-btn nav-btn-desktop">Nodes</a>
+                <a href="/traceroutes.html" class="control-btn nav-btn nav-btn-desktop">Traceroutes</a>
+                <a href="/telemetry.html" class="control-btn nav-btn nav-btn-desktop">Telemetry</a>
+                <select id="nav-dropdown" class="control-select nav-dropdown-mobile" onchange="if(this.value) window.location.href=this.value">
+                    <option value="">Navigate...</option>
+                    <option value="/nodes.html">Nodes</option>
+                    <option value="/traceroutes.html">Traceroutes</option>
+                    <option value="/telemetry.html">Telemetry</option>
+                </select>
             </div>
         </header>
 
