@@ -95,6 +95,20 @@ function initializeMap() {
         maxZoom: 19
     }).addTo(map);
 
+    // Create custom panes for proper z-ordering
+    // Lower z-index = further back
+    map.createPane('coveragePane');
+    map.getPane('coveragePane').style.zIndex = 350;  // Below default overlayPane (400)
+
+    map.createPane('signalPane');
+    map.getPane('signalPane').style.zIndex = 360;
+
+    map.createPane('connectionsPane');
+    map.getPane('connectionsPane').style.zIndex = 370;
+
+    map.createPane('nodesPane');
+    map.getPane('nodesPane').style.zIndex = 450;  // Above overlayPane, ensures nodes on top
+
     map.on('click', function() {
         deselectAllShapes();
         closeDetailsPanel();
@@ -383,7 +397,7 @@ function createNodeMarker(node) {
             iconSize: [28, 28],
             iconAnchor: [14, 14]
         });
-        marker = L.marker([node.position.lat, node.position.lon], { icon }).addTo(map);
+        marker = L.marker([node.position.lat, node.position.lon], { icon, pane: 'nodesPane' }).addTo(map);
 
         // Tooltip with node name
         marker.bindTooltip(node.shortName || node.name, {
@@ -402,7 +416,8 @@ function createNodeMarker(node) {
             color: '#ffffff',
             weight: 2,
             opacity: 1,
-            fillOpacity: 0.85
+            fillOpacity: 0.85,
+            pane: 'nodesPane'
         }).addTo(map);
 
         // Tooltip with node name
@@ -485,7 +500,8 @@ function drawDirectConnection(fromNode, toNode, conn) {
     const lineOptions = {
         color: color,
         weight: style.weight,
-        opacity: DEFAULT_OPACITY
+        opacity: DEFAULT_OPACITY,
+        pane: 'connectionsPane'
     };
     if (style.dashArray) {
         lineOptions.dashArray = style.dashArray;
@@ -579,7 +595,8 @@ function drawHopTierCoverage(relayNode, sendingNodeIds, tier, nodeById) {
         opacity: DEFAULT_OPACITY,
         fillOpacity: DEFAULT_OPACITY * 0.5,
         weight: 2,
-        dashArray: style.dashArray
+        dashArray: style.dashArray,
+        pane: 'coveragePane'
     }).addTo(map);
 
     // Store coverage data and hop tier for filtering/highlighting
@@ -647,7 +664,8 @@ function drawOverallCoverageHull(nodes) {
         fillColor: '#888888',
         opacity: 0.2,
         fillOpacity: 0.2,
-        weight: 1
+        weight: 1,
+        pane: 'coveragePane'
     }).addTo(map);
 }
 
@@ -709,7 +727,8 @@ function drawSignalCoverageCircles(directConnections, nodeById) {
             fillColor: '#667eea',
             fillOpacity: opacity,
             opacity: opacity * 1.5,
-            weight: 1
+            weight: 1,
+            pane: 'signalPane'
         });
 
         // Only add to map if signal circles are enabled
