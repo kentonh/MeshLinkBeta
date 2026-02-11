@@ -9,14 +9,53 @@ let mapData = null;
 let nodeMarkers = [];
 let directConnectionLines = [];
 let indirectCoverageShapes = [];
+let signalCircles = [];
 let overallCoverageHull = null;
 let selectedNode = null;
 let selectedShape = null;
 let timeWindow = 24;
 
+// Layer visibility state
+let layerVisibility = {
+    directLinks: true,
+    hop2Coverage: true,
+    hop3Coverage: true,
+    hop4PlusCoverage: true,
+    signalCircles: false
+};
+
 // Opacity settings
 const DEFAULT_OPACITY = 0.2;
 const SELECTED_OPACITY = 0.7;
+
+// Hop tier styling
+const HOP_TIER_STYLES = {
+    hop_2: {
+        color: '#2196f3',      // Blue
+        fillColor: '#2196f3',
+        dashArray: '8, 4',     // Short dash
+        label: '2-hop'
+    },
+    hop_3: {
+        color: '#ffc107',      // Yellow
+        fillColor: '#ffc107',
+        dashArray: '12, 6',    // Medium dash
+        label: '3-hop'
+    },
+    hop_4_plus: {
+        color: '#f44336',      // Red
+        fillColor: '#f44336',
+        dashArray: '4, 4',     // Dotted
+        label: '4+ hop'
+    }
+};
+
+// Confidence styling for connection lines
+const CONFIDENCE_STYLES = {
+    high: { weight: 6, dashArray: null },
+    medium: { weight: 4, dashArray: '10, 5' },
+    low: { weight: 2, dashArray: '4, 4' }
+};
 
 // Map configuration
 const MAP_CENTER = [37.6872, -97.3301]; // Wichita, Kansas
@@ -80,6 +119,67 @@ function initializeControls() {
     });
 
     document.getElementById('close-details').addEventListener('click', closeDetailsPanel);
+
+    // Layer toggle controls
+    initializeLayerToggles();
+}
+
+// Initialize layer toggle checkboxes
+function initializeLayerToggles() {
+    const toggles = {
+        'toggle-direct-links': 'directLinks',
+        'toggle-hop2': 'hop2Coverage',
+        'toggle-hop3': 'hop3Coverage',
+        'toggle-hop4plus': 'hop4PlusCoverage',
+        'toggle-signal-circles': 'signalCircles'
+    };
+
+    Object.entries(toggles).forEach(([elementId, layerKey]) => {
+        const element = document.getElementById(elementId);
+        if (element) {
+            element.checked = layerVisibility[layerKey];
+            element.addEventListener('change', (e) => {
+                layerVisibility[layerKey] = e.target.checked;
+                updateLayerVisibility();
+            });
+        }
+    });
+}
+
+// Update visibility of map layers based on toggle state
+function updateLayerVisibility() {
+    // Direct connection lines
+    directConnectionLines.forEach(line => {
+        if (layerVisibility.directLinks) {
+            line.addTo(map);
+        } else {
+            line.remove();
+        }
+    });
+
+    // Coverage shapes by tier
+    indirectCoverageShapes.forEach(shape => {
+        const tier = shape._hopTier;
+        let visible = false;
+        if (tier === 'hop_2' && layerVisibility.hop2Coverage) visible = true;
+        if (tier === 'hop_3' && layerVisibility.hop3Coverage) visible = true;
+        if (tier === 'hop_4_plus' && layerVisibility.hop4PlusCoverage) visible = true;
+
+        if (visible) {
+            shape.addTo(map);
+        } else {
+            shape.remove();
+        }
+    });
+
+    // Signal circles
+    signalCircles.forEach(circle => {
+        if (layerVisibility.signalCircles) {
+            circle.addTo(map);
+        } else {
+            circle.remove();
+        }
+    });
 }
 
 // Load map data from API
@@ -111,6 +211,16 @@ function updateStats(stats) {
     document.getElementById('stat-nodes').textContent = stats.totalNodes || 0;
     document.getElementById('stat-direct').textContent = stats.directConnections || 0;
     document.getElementById('stat-indirect').textContent = stats.indirectCoverage || 0;
+
+    // Update hop distribution stats if elements exist
+    const hopDist = stats.hopDistribution || {};
+    const hop2El = document.getElementById('stat-hop2');
+    const hop3El = document.getElementById('stat-hop3');
+    const hop4El = document.getElementById('stat-hop4plus');
+
+    if (hop2El) hop2El.textContent = hopDist.hop_2 || 0;
+    if (hop3El) hop3El.textContent = hopDist.hop_3 || 0;
+    if (hop4El) hop4El.textContent = hopDist.hop_4_plus || 0;
 }
 
 // Show/hide loading indicator
@@ -153,24 +263,30 @@ function renderMap() {
     // Draw overall coverage hull first (underneath everything), excluding airplanes
     drawOverallCoverageHull(shapeNodes);
 
-    // Draw indirect coverage shapes (under connections and nodes)
-    // Shape centered on RELAY node, edges defined by SENDING nodes
+    // Draw hop-tiered indirect coverage shapes (under connections and nodes)
+    // Shape centered on RELAY node, edges defined by SENDING nodes per hop tier
     // Exclude airplane nodes from sending node sets
     indirectCoverage.forEach(coverage => {
         const relayNode = nodeById[coverage.relayNodeId];
         if (relayNode) {
-            const filteredCoverage = {
-                ...coverage,
-                sendingNodeIds: coverage.sendingNodeIds.filter(id => !airplaneIds.has(id))
-            };
-            const shape = drawIndirectCoverage(relayNode, filteredCoverage, nodeById);
-            if (shape) {
-                indirectCoverageShapes.push(shape);
-            }
+            // Draw each hop tier as a separate shape
+            const tiers = ['hop_2', 'hop_3', 'hop_4_plus'];
+            tiers.forEach(tier => {
+                const tierNodes = (coverage[tier] || []).filter(id => !airplaneIds.has(id));
+                if (tierNodes.length > 0) {
+                    const shape = drawHopTierCoverage(relayNode, tierNodes, tier, nodeById);
+                    if (shape) {
+                        indirectCoverageShapes.push(shape);
+                    }
+                }
+            });
         }
     });
 
-    // Draw direct connections
+    // Draw signal-based coverage circles around nodes with SNR data
+    drawSignalCoverageCircles(directConnections, nodeById);
+
+    // Draw direct connections with confidence visualization
     directConnections.forEach(conn => {
         const fromNode = nodeById[conn.from];
         const toNode = nodeById[conn.to];
@@ -188,6 +304,9 @@ function renderMap() {
         const marker = createNodeMarker(node);
         nodeMarkers.push(marker);
     });
+
+    // Apply layer visibility
+    updateLayerVisibility();
 }
 
 // Clear all map layers
@@ -195,6 +314,7 @@ function clearMapLayers() {
     nodeMarkers.forEach(marker => marker.remove());
     directConnectionLines.forEach(line => line.remove());
     indirectCoverageShapes.forEach(shape => shape.remove());
+    signalCircles.forEach(circle => circle.remove());
     if (overallCoverageHull) {
         overallCoverageHull.remove();
         overallCoverageHull = null;
@@ -203,6 +323,7 @@ function clearMapLayers() {
     nodeMarkers = [];
     directConnectionLines = [];
     indirectCoverageShapes = [];
+    signalCircles = [];
     selectedShape = null;
 }
 
@@ -351,26 +472,34 @@ function createNodePopup(node) {
     `;
 }
 
-// Draw a direct connection line
+// Draw a direct connection line with confidence-based styling
 function drawDirectConnection(fromNode, toNode, conn) {
     const color = getConnectionColor(conn.rssi, conn.snr);
+    const confidence = conn.confidence || 'low';
+    const style = CONFIDENCE_STYLES[confidence] || CONFIDENCE_STYLES.low;
+
+    const lineOptions = {
+        color: color,
+        weight: style.weight,
+        opacity: DEFAULT_OPACITY
+    };
+    if (style.dashArray) {
+        lineOptions.dashArray = style.dashArray;
+    }
 
     const line = L.polyline([
         [fromNode.position.lat, fromNode.position.lon],
         [toNode.position.lat, toNode.position.lon]
-    ], {
-        color: color,
-        weight: 6,
-        opacity: DEFAULT_OPACITY
-    }).addTo(map);
+    ], lineOptions).addTo(map);
 
     // Store connection data for highlighting
     line._connData = { from: conn.from, to: conn.to };
 
-    // Popup with connection info
+    // Popup with connection info including confidence
     const rssiStr = conn.rssi !== null ? `${conn.rssi.toFixed(1)} dBm` : 'N/A';
     const snrStr = conn.snr !== null ? `${conn.snr.toFixed(1)} dB` : 'N/A';
     const sourceStr = conn.source || 'packet';
+    const confidenceLabel = confidence.charAt(0).toUpperCase() + confidence.slice(1);
 
     line.bindPopup(`
         <div class="popup-content">
@@ -392,6 +521,10 @@ function drawDirectConnection(fromNode, toNode, conn) {
                     <span class="popup-label">Packets:</span>
                     <span>${conn.packetCount || 0}</span>
                 </div>
+                <div class="popup-row">
+                    <span class="popup-label">Confidence:</span>
+                    <span class="confidence-${confidence}">${confidenceLabel}</span>
+                </div>
             </div>
         </div>
     `, { maxWidth: 250 });
@@ -399,11 +532,11 @@ function drawDirectConnection(fromNode, toNode, conn) {
     return line;
 }
 
-// Draw indirect coverage shape (convex hull)
+// Draw hop-tier specific coverage shape (convex hull)
 // relayNode is included in the shape
-// sendingNodes define the boundary
-function drawIndirectCoverage(relayNode, coverage, nodeById) {
-    const sendingNodes = coverage.sendingNodeIds
+// sendingNodeIds define the boundary for this specific hop tier
+function drawHopTierCoverage(relayNode, sendingNodeIds, tier, nodeById) {
+    const sendingNodes = sendingNodeIds
         .map(id => nodeById[id])
         .filter(n => n && n.position);
 
@@ -411,6 +544,7 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
 
     const relayLat = relayNode.position.lat;
     const relayLon = relayNode.position.lon;
+    const style = HOP_TIER_STYLES[tier];
 
     // Collect all points: relay node + all sending nodes
     const allPoints = [
@@ -436,32 +570,38 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
     }
 
     const shape = L.polygon(hullPoints, {
-        color: 'rgba(102, 126, 234, 0.8)',
-        fillColor: 'rgba(102, 126, 234, 0.4)',
+        color: style.color,
+        fillColor: style.fillColor,
         opacity: DEFAULT_OPACITY,
-        fillOpacity: DEFAULT_OPACITY,
+        fillOpacity: DEFAULT_OPACITY * 0.5,
         weight: 2,
-        dashArray: '5, 10'
+        dashArray: style.dashArray
     }).addTo(map);
 
-    // Store coverage data for highlighting when node is clicked
+    // Store coverage data and hop tier for filtering/highlighting
     shape._coverageData = {
-        relayNodeId: coverage.relayNodeId,
-        sendingNodeIds: coverage.sendingNodeIds
+        relayNodeId: relayNode.id,
+        sendingNodeIds: sendingNodeIds
     };
+    shape._hopTier = tier;
 
     const nodeNames = sendingNodes.map(n => n.shortName).join(', ');
+    const hopLabel = style.label;
 
     shape.bindPopup(`
         <div class="popup-content">
-            <div class="popup-title">Indirect Coverage: ${escapeHtml(relayNode.shortName)}</div>
+            <div class="popup-title">${hopLabel} Coverage: ${escapeHtml(relayNode.shortName)}</div>
             <div class="popup-details">
                 <div class="popup-row">
                     <span class="popup-label">Relay Node:</span>
                     <span>${escapeHtml(relayNode.shortName)}</span>
                 </div>
                 <div class="popup-row">
-                    <span class="popup-label">Total Nodes Reached:</span>
+                    <span class="popup-label">Hop Tier:</span>
+                    <span class="hop-tier-${tier.replace('_', '-')}">${hopLabel}</span>
+                </div>
+                <div class="popup-row">
+                    <span class="popup-label">Nodes Reached:</span>
                     <span>${sendingNodes.length}</span>
                 </div>
                 <div class="popup-row">
@@ -472,15 +612,18 @@ function drawIndirectCoverage(relayNode, coverage, nodeById) {
                     <span class="popup-label">Max Range:</span>
                     <span>${(maxDistance / 1000).toFixed(2)} km</span>
                 </div>
-                <div class="popup-row">
-                    <span class="popup-label">Hop Count:</span>
-                    <span>2+</span>
-                </div>
             </div>
         </div>
     `);
 
     return shape;
+}
+
+// Legacy function for backward compatibility
+function drawIndirectCoverage(relayNode, coverage, nodeById) {
+    // Use all sending nodes as hop_2 for legacy data without tier info
+    const sendingNodeIds = coverage.sendingNodeIds || [];
+    return drawHopTierCoverage(relayNode, sendingNodeIds, 'hop_2', nodeById);
 }
 
 // Draw overall coverage hull encompassing all nodes
@@ -502,6 +645,118 @@ function drawOverallCoverageHull(nodes) {
         fillOpacity: 0.2,
         weight: 1
     }).addTo(map);
+}
+
+// Draw signal-based coverage circles around nodes
+// Radius based on observed SNR (approximates range)
+function drawSignalCoverageCircles(directConnections, nodeById) {
+    // Aggregate SNR data per node
+    const nodeSnrData = {};
+
+    directConnections.forEach(conn => {
+        if (conn.snr !== null && conn.snr !== undefined) {
+            // Track SNR for both ends of connection
+            [conn.from, conn.to].forEach(nodeId => {
+                if (!nodeSnrData[nodeId]) {
+                    nodeSnrData[nodeId] = {
+                        snrSum: 0,
+                        snrCount: 0,
+                        minSnr: Infinity,
+                        packetCount: 0
+                    };
+                }
+                nodeSnrData[nodeId].snrSum += conn.snr;
+                nodeSnrData[nodeId].snrCount++;
+                nodeSnrData[nodeId].minSnr = Math.min(nodeSnrData[nodeId].minSnr, conn.snr);
+                nodeSnrData[nodeId].packetCount += conn.packetCount || 1;
+            });
+        }
+    });
+
+    // Draw circles for nodes with SNR data
+    Object.entries(nodeSnrData).forEach(([nodeId, data]) => {
+        const node = nodeById[nodeId];
+        if (!node || !node.position) return;
+
+        const avgSnr = data.snrSum / data.snrCount;
+
+        // Estimate range based on SNR (lower SNR = farther = larger circle)
+        // SNR 10+ dB → ~500m (close)
+        // SNR 0 dB → ~2km (moderate)
+        // SNR -10 dB → ~5km (edge of range)
+        const radius = estimateRangeFromSnr(avgSnr);
+
+        // Calculate confidence from packet count
+        let confidence, opacity;
+        if (data.packetCount >= 20) {
+            confidence = 'high';
+            opacity = 0.25;
+        } else if (data.packetCount >= 5) {
+            confidence = 'medium';
+            opacity = 0.15;
+        } else {
+            confidence = 'low';
+            opacity = 0.08;
+        }
+
+        const circle = L.circle([node.position.lat, node.position.lon], {
+            radius: radius,
+            color: '#667eea',
+            fillColor: '#667eea',
+            fillOpacity: opacity,
+            opacity: opacity * 1.5,
+            weight: 1
+        });
+
+        // Only add to map if signal circles are enabled
+        if (layerVisibility.signalCircles) {
+            circle.addTo(map);
+        }
+
+        circle.bindPopup(`
+            <div class="popup-content">
+                <div class="popup-title">Signal Range: ${escapeHtml(node.shortName || node.name)}</div>
+                <div class="popup-details">
+                    <div class="popup-row">
+                        <span class="popup-label">Avg SNR:</span>
+                        <span>${avgSnr.toFixed(1)} dB</span>
+                    </div>
+                    <div class="popup-row">
+                        <span class="popup-label">Min SNR:</span>
+                        <span>${data.minSnr.toFixed(1)} dB</span>
+                    </div>
+                    <div class="popup-row">
+                        <span class="popup-label">Est. Range:</span>
+                        <span>${(radius / 1000).toFixed(1)} km</span>
+                    </div>
+                    <div class="popup-row">
+                        <span class="popup-label">Confidence:</span>
+                        <span class="confidence-${confidence}">${confidence.charAt(0).toUpperCase() + confidence.slice(1)}</span>
+                    </div>
+                    <div class="popup-row">
+                        <span class="popup-label">Observations:</span>
+                        <span>${data.packetCount}</span>
+                    </div>
+                </div>
+            </div>
+        `);
+
+        signalCircles.push(circle);
+    });
+}
+
+// Estimate communication range from SNR value (in meters)
+// Based on typical LoRa propagation characteristics
+function estimateRangeFromSnr(snr) {
+    // Higher SNR = closer = smaller circle
+    // SNR typically ranges from -20 to +15 dB
+    // These values are approximations for typical terrain
+    if (snr >= 10) return 500;      // Very strong signal, close
+    if (snr >= 5) return 1000;      // Strong signal
+    if (snr >= 0) return 2000;      // Moderate signal
+    if (snr >= -5) return 3000;     // Weak signal
+    if (snr >= -10) return 5000;    // Very weak, edge of range
+    return 7000;                     // Extremely weak, max range
 }
 
 // Compute convex hull of a set of points using monotone chain algorithm
@@ -672,9 +927,15 @@ function showNodeDetails(node) {
                 <span class="detail-value">Relay Node</span>
             </div>
             <div class="detail-row">
-                <span class="detail-label">Reaches (2+ hops):</span>
+                <span class="detail-label">Reaches (multi-hop):</span>
                 <span class="detail-value">${indirectInfo.nodeCount} nodes</span>
             </div>
+            ${indirectInfo.tierBreakdown ? `
+            <div class="detail-row">
+                <span class="detail-label">By Hop Tier:</span>
+                <span class="detail-value">${escapeHtml(indirectInfo.tierBreakdown)}</span>
+            </div>
+            ` : ''}
             <div class="detail-row">
                 <span class="detail-label">Nodes:</span>
                 <span class="detail-value">${escapeHtml(indirectInfo.nodeNames)}</span>
@@ -688,6 +949,12 @@ function showNodeDetails(node) {
                 <span class="detail-label">Through:</span>
                 <span class="detail-value">${indirectInfo.nodeCount} relay(s)</span>
             </div>
+            ${indirectInfo.hopTiers ? `
+            <div class="detail-row">
+                <span class="detail-label">Hop Distance:</span>
+                <span class="detail-value">${escapeHtml(indirectInfo.hopTiers)}</span>
+            </div>
+            ` : ''}
             <div class="detail-row">
                 <span class="detail-label">Relays:</span>
                 <span class="detail-value">${escapeHtml(indirectInfo.nodeNames)}</span>
@@ -852,18 +1119,17 @@ function highlightNodeShapes(nodeId) {
     highlightNodeConnections(nodeId);
 
     // Also highlight indirect coverage shapes for this node (as relay or sending)
-    if (mapData && mapData.indirectCoverage) {
-        mapData.indirectCoverage.forEach((coverage, index) => {
-            if (coverage.relayNodeId === nodeId || coverage.sendingNodeIds.includes(nodeId)) {
-                if (indirectCoverageShapes[index]) {
-                    indirectCoverageShapes[index].setStyle({
-                        opacity: SELECTED_OPACITY,
-                        fillOpacity: SELECTED_OPACITY
-                    });
-                }
+    indirectCoverageShapes.forEach(shape => {
+        if (shape._coverageData) {
+            const data = shape._coverageData;
+            if (data.relayNodeId === nodeId || data.sendingNodeIds.includes(nodeId)) {
+                shape.setStyle({
+                    opacity: SELECTED_OPACITY,
+                    fillOpacity: SELECTED_OPACITY
+                });
             }
-        });
-    }
+        }
+    });
 }
 
 // Get direct connections for a node
@@ -894,30 +1160,67 @@ function getNodeIndirectCoverage(nodeId) {
     // Check if this node is a relay for indirect connections
     const asRelay = mapData.indirectCoverage.find(c => c.relayNodeId === nodeId);
     if (asRelay) {
-        const sendingNames = asRelay.sendingNodeIds.map(id => {
+        // Collect all sending nodes across tiers
+        const allSendingIds = new Set([
+            ...(asRelay.hop_2 || []),
+            ...(asRelay.hop_3 || []),
+            ...(asRelay.hop_4_plus || []),
+            ...(asRelay.sendingNodeIds || [])
+        ]);
+
+        const sendingNames = Array.from(allSendingIds).map(id => {
             const node = mapData.nodes.find(n => n.id === id);
             return node ? node.shortName : id.slice(-4);
         }).join(', ');
 
+        // Build tier breakdown
+        const tierBreakdown = [];
+        if (asRelay.hop_2 && asRelay.hop_2.length > 0) {
+            tierBreakdown.push(`2-hop: ${asRelay.hop_2.length}`);
+        }
+        if (asRelay.hop_3 && asRelay.hop_3.length > 0) {
+            tierBreakdown.push(`3-hop: ${asRelay.hop_3.length}`);
+        }
+        if (asRelay.hop_4_plus && asRelay.hop_4_plus.length > 0) {
+            tierBreakdown.push(`4+ hop: ${asRelay.hop_4_plus.length}`);
+        }
+
         return {
             role: 'relay',
-            nodeCount: asRelay.sendingNodeIds.length,
-            nodeNames: sendingNames
+            nodeCount: allSendingIds.size,
+            nodeNames: sendingNames,
+            tierBreakdown: tierBreakdown.join(', ') || 'N/A'
         };
     }
 
     // Check if this node is reached indirectly through relays
-    const asSource = mapData.indirectCoverage.filter(c => c.sendingNodeIds.includes(nodeId));
+    const asSource = mapData.indirectCoverage.filter(c => {
+        return (c.sendingNodeIds && c.sendingNodeIds.includes(nodeId)) ||
+               (c.hop_2 && c.hop_2.includes(nodeId)) ||
+               (c.hop_3 && c.hop_3.includes(nodeId)) ||
+               (c.hop_4_plus && c.hop_4_plus.includes(nodeId));
+    });
+
     if (asSource.length > 0) {
         const relayNames = asSource.map(c => {
             const node = mapData.nodes.find(n => n.id === c.relayNodeId);
             return node ? node.shortName : c.relayNodeId.slice(-4);
         }).join(', ');
 
+        // Determine which tier(s) this node appears in
+        const tiers = [];
+        asSource.forEach(c => {
+            if (c.hop_2 && c.hop_2.includes(nodeId)) tiers.push('2-hop');
+            if (c.hop_3 && c.hop_3.includes(nodeId)) tiers.push('3-hop');
+            if (c.hop_4_plus && c.hop_4_plus.includes(nodeId)) tiers.push('4+ hop');
+        });
+        const uniqueTiers = [...new Set(tiers)];
+
         return {
             role: 'sending',
             nodeCount: asSource.length,
-            nodeNames: relayNames
+            nodeNames: relayNames,
+            hopTiers: uniqueTiers.join(', ') || '2+ hops'
         };
     }
 

@@ -74,12 +74,20 @@
                 <span id="stat-nodes" class="stat-value">0</span>
             </div>
             <div class="stat-item">
-                <span class="stat-label">Direct Links:</span>
+                <span class="stat-label">Direct:</span>
                 <span id="stat-direct" class="stat-value">0</span>
             </div>
-            <div class="stat-item">
-                <span class="stat-label">Indirect Coverage:</span>
-                <span id="stat-indirect" class="stat-value">0</span>
+            <div class="stat-item stat-hop" title="2-hop connections">
+                <span class="stat-label">2-hop:</span>
+                <span id="stat-hop2" class="stat-value hop-2">0</span>
+            </div>
+            <div class="stat-item stat-hop" title="3-hop connections">
+                <span class="stat-label">3-hop:</span>
+                <span id="stat-hop3" class="stat-value hop-3">0</span>
+            </div>
+            <div class="stat-item stat-hop" title="4+ hop connections">
+                <span class="stat-label">4+hop:</span>
+                <span id="stat-hop4plus" class="stat-value hop-4-plus">0</span>
             </div>
             <div class="stat-item loading-indicator" id="loading-indicator">
                 <span class="spinner"></span>
@@ -113,38 +121,73 @@
                     <span>Older</span>
                 </div>
             </div>
+
             <div class="legend-section">
-                <div class="legend-title">Direct Connections</div>
-                <div class="legend-subtitle">Confirmed RF links</div>
+                <div class="legend-title">
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="toggle-direct-links" checked>
+                        Direct Links
+                    </label>
+                </div>
+                <div class="legend-subtitle">Line thickness = confidence</div>
                 <div class="legend-item">
-                    <span class="legend-line" style="background: #09af0f;"></span>
-                    <span>Good signal</span>
+                    <span class="legend-line solid thick" style="background: #09af0f;"></span>
+                    <span>Good signal (high conf)</span>
                 </div>
                 <div class="legend-item">
-                    <span class="legend-line" style="background: #ffc107;"></span>
-                    <span>Fair signal</span>
+                    <span class="legend-line solid" style="background: #ffc107;"></span>
+                    <span>Fair signal (med conf)</span>
                 </div>
                 <div class="legend-item">
-                    <span class="legend-line" style="background: #f44336;"></span>
-                    <span>Poor signal</span>
+                    <span class="legend-line dashed thin" style="background: #f44336;"></span>
+                    <span>Poor signal (low conf)</span>
                 </div>
                 <div class="legend-item">
-                    <span class="legend-line" style="background: #667eea;"></span>
+                    <span class="legend-line solid" style="background: #667eea;"></span>
                     <span>Unknown signal</span>
                 </div>
             </div>
+
             <div class="legend-section">
-                <div class="legend-title">Indirect Coverage</div>
-                <div class="legend-subtitle">Inferred reach (2+ hops)</div>
+                <div class="legend-title">Hop-Tiered Coverage</div>
+                <div class="legend-subtitle">Multi-hop mesh reach</div>
                 <div class="legend-item">
-                    <span class="legend-circle"></span>
-                    <span>Confirmed Relay Reach</span>
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="toggle-hop2" checked>
+                        <span class="legend-tier hop-2-tier"></span>
+                        <span>2-hop (blue dashed)</span>
+                    </label>
                 </div>
                 <div class="legend-item">
-                    <span class="legend-polygon"></span>
-                    <span>Theoretical Mesh Reach</span>
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="toggle-hop3" checked>
+                        <span class="legend-tier hop-3-tier"></span>
+                        <span>3-hop (yellow dashed)</span>
+                    </label>
+                </div>
+                <div class="legend-item">
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="toggle-hop4plus" checked>
+                        <span class="legend-tier hop-4-plus-tier"></span>
+                        <span>4+ hop (red dotted)</span>
+                    </label>
                 </div>
             </div>
+
+            <div class="legend-section">
+                <div class="legend-title">
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="toggle-signal-circles">
+                        Signal Circles
+                    </label>
+                </div>
+                <div class="legend-subtitle">Estimated range from SNR</div>
+                <div class="legend-item">
+                    <span class="legend-circle signal-circle"></span>
+                    <span>Range estimate (opacity = confidence)</span>
+                </div>
+            </div>
+
             <button class="legend-toggle" id="legend-toggle">Hide Legend</button>
         </div>
 
