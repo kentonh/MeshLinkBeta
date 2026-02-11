@@ -25,8 +25,8 @@ let layerVisibility = {
 };
 
 // Opacity settings
-const DEFAULT_OPACITY = 0.2;
-const SELECTED_OPACITY = 0.7;
+const DEFAULT_OPACITY = 0.5;
+const SELECTED_OPACITY = 0.85;
 
 // Hop tier styling
 const HOP_TIER_STYLES = {
@@ -52,9 +52,9 @@ const HOP_TIER_STYLES = {
 
 // Confidence styling for connection lines
 const CONFIDENCE_STYLES = {
-    high: { weight: 6, dashArray: null },
-    medium: { weight: 4, dashArray: '10, 5' },
-    low: { weight: 2, dashArray: '4, 4' }
+    high: { weight: 8, dashArray: null },
+    medium: { weight: 6, dashArray: '10, 5' },
+    low: { weight: 4, dashArray: '4, 4' }
 };
 
 // Map configuration
