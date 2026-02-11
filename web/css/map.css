@@ -118,6 +118,10 @@ body {
 }
 
 /* Hop distribution stat colors */
+.stat-value.hop-1 {
+    color: #00bcd4;
+}
+
 .stat-value.hop-2 {
     color: #2196f3;
 }
@@ -262,6 +266,11 @@ body {
     margin-right: 6px;
     vertical-align: middle;
     border-radius: 2px;
+}
+
+.legend-tier.hop-1-tier {
+    background: rgba(0, 188, 212, 0.4);
+    border: 2px solid #00bcd4;
 }
 
 .legend-tier.hop-2-tier {
@@ -585,6 +594,11 @@ body {
 }
 
 /* Hop tier indicators in popups */
+.hop-tier-hop-1 {
+    color: #00bcd4;
+    font-weight: 500;
+}
+
 .hop-tier-hop-2 {
     color: #2196f3;
     font-weight: 500;

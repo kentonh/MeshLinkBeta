@@ -77,6 +77,10 @@
                 <span class="stat-label">Direct:</span>
                 <span id="stat-direct" class="stat-value">0</span>
             </div>
+            <div class="stat-item stat-hop" title="1-hop connections">
+                <span class="stat-label">1-hop:</span>
+                <span id="stat-hop1" class="stat-value hop-1">0</span>
+            </div>
             <div class="stat-item stat-hop" title="2-hop connections">
                 <span class="stat-label">2-hop:</span>
                 <span id="stat-hop2" class="stat-value hop-2">0</span>
@@ -151,6 +155,13 @@
             <div class="legend-section">
                 <div class="legend-title">Hop-Tiered Coverage</div>
                 <div class="legend-subtitle">Multi-hop mesh reach</div>
+                <div class="legend-item">
+                    <label class="layer-toggle">
+                        <input type="checkbox" id="toggle-hop1" checked>
+                        <span class="legend-tier hop-1-tier"></span>
+                        <span>1-hop (cyan solid)</span>
+                    </label>
+                </div>
                 <div class="legend-item">
                     <label class="layer-toggle">
                         <input type="checkbox" id="toggle-hop2" checked>

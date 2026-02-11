@@ -18,6 +18,7 @@ let timeWindow = 24;
 // Layer visibility state
 let layerVisibility = {
     directLinks: true,
+    hop1Coverage: true,
     hop2Coverage: true,
     hop3Coverage: true,
     hop4PlusCoverage: true,
@@ -30,6 +31,12 @@ const SELECTED_OPACITY = 0.85;
 
 // Hop tier styling
 const HOP_TIER_STYLES = {
+    hop_1: {
+        color: '#00bcd4',      // Cyan/Teal
+        fillColor: '#00bcd4',
+        dashArray: null,       // Solid
+        label: '1-hop'
+    },
     hop_2: {
         color: '#2196f3',      // Blue
         fillColor: '#2196f3',
@@ -142,6 +149,7 @@ function initializeControls() {
 function initializeLayerToggles() {
     const toggles = {
         'toggle-direct-links': 'directLinks',
+        'toggle-hop1': 'hop1Coverage',
         'toggle-hop2': 'hop2Coverage',
         'toggle-hop3': 'hop3Coverage',
         'toggle-hop4plus': 'hop4PlusCoverage',
@@ -175,6 +183,7 @@ function updateLayerVisibility() {
     indirectCoverageShapes.forEach(shape => {
         const tier = shape._hopTier;
         let visible = false;
+        if (tier === 'hop_1' && layerVisibility.hop1Coverage) visible = true;
         if (tier === 'hop_2' && layerVisibility.hop2Coverage) visible = true;
         if (tier === 'hop_3' && layerVisibility.hop3Coverage) visible = true;
         if (tier === 'hop_4_plus' && layerVisibility.hop4PlusCoverage) visible = true;
@@ -232,10 +241,12 @@ function updateStats(stats) {
 
     // Update hop distribution stats if elements exist
     const hopDist = stats.hopDistribution || {};
+    const hop1El = document.getElementById('stat-hop1');
     const hop2El = document.getElementById('stat-hop2');
     const hop3El = document.getElementById('stat-hop3');
     const hop4El = document.getElementById('stat-hop4plus');
 
+    if (hop1El) hop1El.textContent = hopDist.hop_1 || 0;
     if (hop2El) hop2El.textContent = hopDist.hop_2 || 0;
     if (hop3El) hop3El.textContent = hopDist.hop_3 || 0;
     if (hop4El) hop4El.textContent = hopDist.hop_4_plus || 0;
@@ -288,7 +299,7 @@ function renderMap() {
         const relayNode = nodeById[coverage.relayNodeId];
         if (relayNode) {
             // Draw each hop tier as a separate shape
-            const tiers = ['hop_2', 'hop_3', 'hop_4_plus'];
+            const tiers = ['hop_1', 'hop_2', 'hop_3', 'hop_4_plus'];
             tiers.forEach(tier => {
                 const tierNodes = (coverage[tier] || []).filter(id => !airplaneIds.has(id));
                 if (tierNodes.length > 0) {
@@ -1185,6 +1196,7 @@ function getNodeIndirectCoverage(nodeId) {
     if (asRelay) {
         // Collect all sending nodes across tiers
         const allSendingIds = new Set([
+            ...(asRelay.hop_1 || []),
             ...(asRelay.hop_2 || []),
             ...(asRelay.hop_3 || []),
             ...(asRelay.hop_4_plus || []),
@@ -1198,6 +1210,9 @@ function getNodeIndirectCoverage(nodeId) {
 
         // Build tier breakdown
         const tierBreakdown = [];
+        if (asRelay.hop_1 && asRelay.hop_1.length > 0) {
+            tierBreakdown.push(`1-hop: ${asRelay.hop_1.length}`);
+        }
         if (asRelay.hop_2 && asRelay.hop_2.length > 0) {
             tierBreakdown.push(`2-hop: ${asRelay.hop_2.length}`);
         }
@@ -1219,6 +1234,7 @@ function getNodeIndirectCoverage(nodeId) {
     // Check if this node is reached indirectly through relays
     const asSource = mapData.indirectCoverage.filter(c => {
         return (c.sendingNodeIds && c.sendingNodeIds.includes(nodeId)) ||
+               (c.hop_1 && c.hop_1.includes(nodeId)) ||
                (c.hop_2 && c.hop_2.includes(nodeId)) ||
                (c.hop_3 && c.hop_3.includes(nodeId)) ||
                (c.hop_4_plus && c.hop_4_plus.includes(nodeId));
@@ -1233,6 +1249,7 @@ function getNodeIndirectCoverage(nodeId) {
         // Determine which tier(s) this node appears in
         const tiers = [];
         asSource.forEach(c => {
+            if (c.hop_1 && c.hop_1.includes(nodeId)) tiers.push('1-hop');
             if (c.hop_2 && c.hop_2.includes(nodeId)) tiers.push('2-hop');
             if (c.hop_3 && c.hop_3.includes(nodeId)) tiers.push('3-hop');
             if (c.hop_4_plus && c.hop_4_plus.includes(nodeId)) tiers.push('4+ hop');
@@ -1243,7 +1260,7 @@ function getNodeIndirectCoverage(nodeId) {
             role: 'sending',
             nodeCount: asSource.length,
             nodeNames: relayNames,
-            hopTiers: uniqueTiers.join(', ') || '2+ hops'
+            hopTiers: uniqueTiers.join(', ') || '1+ hops'
         };
     }
 

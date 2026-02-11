@@ -531,7 +531,7 @@ class NodeWebServer(plugins.Base):
                 indirect_coverage_map = {}
 
                 # Track hop distribution stats
-                hop_stats = {'hop_1': 0, 'hop_2': 0, 'hop_3': 0, 'hop_4_plus': 0}
+                hop_stats = {'hop_0': 0, 'hop_1': 0, 'hop_2': 0, 'hop_3': 0, 'hop_4_plus': 0}
 
                 # Get my node ID for local node reference
                 my_node_id = None
@@ -557,14 +557,11 @@ class NodeWebServer(plugins.Base):
                     relay_id = row['relay_node_id']
                     hops_away = row['hops_away'] or 0
 
-                    if hops_away < 2:
-                        # Direct connection: relay_node -> local_node (we received via this relay)
-                        # This means relay can hear source directly
-                        hop_stats['hop_1'] += 1
+                    if hops_away == 0:
+                        # Direct connection (0-hop): relay_node heard source directly via RF
+                        hop_stats['hop_0'] += 1
                         if relay_id in node_lookup:
-                            # We don't know local node ID here, but we know relay heard source
-                            # Actually per spec: "there is a direct connection" from relay to local
-                            # For map purposes, we'll track relay <-> source as a link
+                            # Track relay <-> source as a direct link
                             key = tuple(sorted([source_id, relay_id]))
                             if key not in direct_connections_map and source_id in node_lookup:
                                 direct_connections_map[key] = {
@@ -578,18 +575,22 @@ class NodeWebServer(plugins.Base):
                             elif key in direct_connections_map:
                                 direct_connections_map[key]['packetCount'] += 1
                     else:
-                        # Indirect connection: relay can reach source indirectly (2+ hops)
-                        # Track by hop tier: 2, 3, or 4+
+                        # Indirect connection: 1+ hops go to coverage polygons
+                        # Track by hop tier: 1, 2, 3, or 4+
                         # Center shape on RELAY, edge defined by SENDING node
                         if source_id in node_lookup and relay_id in node_lookup:
                             if relay_id not in indirect_coverage_map:
                                 indirect_coverage_map[relay_id] = {
+                                    'hop_1': set(),
                                     'hop_2': set(),
                                     'hop_3': set(),
                                     'hop_4_plus': set()
                                 }
                             # Categorize by hop tier
-                            if hops_away == 2:
+                            if hops_away == 1:
+                                indirect_coverage_map[relay_id]['hop_1'].add(source_id)
+                                hop_stats['hop_1'] += 1
+                            elif hops_away == 2:
                                 indirect_coverage_map[relay_id]['hop_2'].add(source_id)
                                 hop_stats['hop_2'] += 1
                             elif hops_away == 3:
@@ -651,9 +652,9 @@ class NodeWebServer(plugins.Base):
                     relay_id = row['relay_node_id']
                     hops_away = row['hops_away'] or 0
 
-                    if hops_away < 2:
-                        # Direct connection between source and relay
-                        hop_stats['hop_1'] += 1
+                    if hops_away == 0:
+                        # Direct connection (0-hop) between source and relay
+                        hop_stats['hop_0'] += 1
                         if source_id in node_lookup and relay_id in node_lookup:
                             key = tuple(sorted([source_id, relay_id]))
                             if key not in direct_connections_map:
@@ -668,17 +669,21 @@ class NodeWebServer(plugins.Base):
                             else:
                                 direct_connections_map[key]['packetCount'] += 1
                     else:
-                        # Indirect connection: relay can reach source indirectly (2+ hops)
-                        # Track by hop tier: 2, 3, or 4+
+                        # Indirect connection: 1+ hops go to coverage polygons
+                        # Track by hop tier: 1, 2, 3, or 4+
                         if source_id in node_lookup and relay_id in node_lookup:
                             if relay_id not in indirect_coverage_map:
                                 indirect_coverage_map[relay_id] = {
+                                    'hop_1': set(),
                                     'hop_2': set(),
                                     'hop_3': set(),
                                     'hop_4_plus': set()
                                 }
                             # Categorize by hop tier
-                            if hops_away == 2:
+                            if hops_away == 1:
+                                indirect_coverage_map[relay_id]['hop_1'].add(source_id)
+                                hop_stats['hop_1'] += 1
+                            elif hops_away == 2:
                                 indirect_coverage_map[relay_id]['hop_2'].add(source_id)
                                 hop_stats['hop_2'] += 1
                             elif hops_away == 3:
@@ -714,19 +719,22 @@ class NodeWebServer(plugins.Base):
                 indirect_coverage = []
                 for relay_id, hop_tiers in indirect_coverage_map.items():
                     # Count total nodes across all tiers
-                    total_nodes = (len(hop_tiers['hop_2']) +
-                                   len(hop_tiers['hop_3']) +
-                                   len(hop_tiers['hop_4_plus']))
+                    total_nodes = (len(hop_tiers.get('hop_1', set())) +
+                                   len(hop_tiers.get('hop_2', set())) +
+                                   len(hop_tiers.get('hop_3', set())) +
+                                   len(hop_tiers.get('hop_4_plus', set())))
                     if total_nodes > 0:
                         indirect_coverage.append({
                             'relayNodeId': relay_id,
-                            'hop_2': list(hop_tiers['hop_2']),
-                            'hop_3': list(hop_tiers['hop_3']),
-                            'hop_4_plus': list(hop_tiers['hop_4_plus']),
+                            'hop_1': list(hop_tiers.get('hop_1', set())),
+                            'hop_2': list(hop_tiers.get('hop_2', set())),
+                            'hop_3': list(hop_tiers.get('hop_3', set())),
+                            'hop_4_plus': list(hop_tiers.get('hop_4_plus', set())),
                             # Legacy field for backwards compatibility
-                            'sendingNodeIds': list(hop_tiers['hop_2'] |
-                                                   hop_tiers['hop_3'] |
-                                                   hop_tiers['hop_4_plus'])
+                            'sendingNodeIds': list(hop_tiers.get('hop_1', set()) |
+                                                   hop_tiers.get('hop_2', set()) |
+                                                   hop_tiers.get('hop_3', set()) |
+                                                   hop_tiers.get('hop_4_plus', set()))
                         })
 
                 # Stats including hop distribution
