@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Send Message</title>
+    <link rel="stylesheet" href="css/map.css">
+    <style>
+        .send-page {
+            min-height: 100vh;
+            background: #1a1a2e;
+        }
+
+        .send-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .send-card {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .send-card h2 {
+            color: #495057;
+            margin-bottom: 20px;
+            font-size: 1.3em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #495057;
+            font-weight: 500;
+        }
+
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            font-size: 1em;
+            font-family: inherit;
+            box-sizing: border-box;
+        }
+
+        .form-group textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.15);
+        }
+
+        .char-count {
+            text-align: right;
+            font-size: 0.85em;
+            color: #6c757d;
+            margin-top: 4px;
+        }
+
+        .char-count.warning {
+            color: #ffc107;
+        }
+
+        .char-count.danger {
+            color: #dc3545;
+        }
+
+        .send-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .send-btn:hover {
+            opacity: 0.9;
+        }
+
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status-message {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            display: none;
+        }
+
+        .status-message.success {
+            background: #d4edda;
+            color: #155724;
+            display: block;
+        }
+
+        .status-message.error {
+            background: #f8d7da;
+            color: #721c24;
+            display: block;
+        }
+
+        .recent-messages {
+            margin-top: 24px;
+        }
+
+        .recent-messages h3 {
+            color: #495057;
+            font-size: 1.1em;
+            margin-bottom: 12px;
+        }
+
+        .recent-message {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border-left: 3px solid #667eea;
+        }
+
+        .recent-message .message-text {
+            color: #212529;
+            margin-bottom: 4px;
+        }
+
+        .recent-message .message-meta {
+            font-size: 0.8em;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="send-page">
+        <header class="map-header">
+            <div class="header-left">
+                <h1>Send Message</h1>
+            </div>
+            <div class="header-controls">
+                <a href="/map.html" class="control-btn nav-btn nav-btn-desktop">Map</a>
+                <a href="/nodes.html" class="control-btn nav-btn nav-btn-desktop">Nodes</a>
+                <a href="/traceroutes.html" class="control-btn nav-btn nav-btn-desktop">Traceroutes</a>
+                <select class="control-select nav-dropdown-mobile" onchange="if(this.value) window.location.href=this.value">
+                    <option value="">Navigate...</option>
+                    <option value="/map.html">Map</option>
+                    <option value="/nodes.html">Nodes</option>
+                    <option value="/traceroutes.html">Traceroutes</option>
+                </select>
+            </div>
+        </header>
+
+        <div class="send-container">
+            <div class="send-card">
+                <h2>Send a Message on the Mesh</h2>
+
+                <form id="send-form">
+                    <div class="form-group">
+                        <label for="channel">Channel</label>
+                        <select id="channel" name="channel">
+                            <option value="0">Channel 0 (Primary)</option>
+                            <option value="1">Channel 1</option>
+                            <option value="2">Channel 2</option>
+                            <option value="3">Channel 3</option>
+                            <option value="4">Channel 4</option>
+                            <option value="5">Channel 5</option>
+                            <option value="6">Channel 6</option>
+                            <option value="7">Channel 7</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="message">Message</label>
+                        <textarea id="message" name="message" placeholder="Type your message here..." maxlength="228"></textarea>
+                        <div class="char-count"><span id="char-count">0</span> / 228</div>
+                    </div>
+
+                    <button type="submit" class="send-btn" id="send-btn">Send Message</button>
+                </form>
+
+                <div class="status-message" id="status-message"></div>
+
+                <div class="recent-messages" id="recent-messages">
+                    <h3>Recently Sent</h3>
+                    <div id="recent-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('send-form');
+        const messageInput = document.getElementById('message');
+        const charCount = document.getElementById('char-count');
+        const charCountContainer = document.querySelector('.char-count');
+        const sendBtn = document.getElementById('send-btn');
+        const statusMessage = document.getElementById('status-message');
+        const recentList = document.getElementById('recent-list');
+
+        // Load recent messages from localStorage
+        let recentMessages = JSON.parse(localStorage.getItem('recentSentMessages') || '[]');
+        renderRecentMessages();
+
+        // Character count
+        messageInput.addEventListener('input', () => {
+            const len = messageInput.value.length;
+            charCount.textContent = len;
+
+            charCountContainer.classList.remove('warning', 'danger');
+            if (len > 200) {
+                charCountContainer.classList.add('danger');
+            } else if (len > 150) {
+                charCountContainer.classList.add('warning');
+            }
+        });
+
+        // Form submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const message = messageInput.value.trim();
+            const channel = parseInt(document.getElementById('channel').value);
+
+            if (!message) {
+                showStatus('Please enter a message', 'error');
+                return;
+            }
+
+            sendBtn.disabled = true;
+            sendBtn.textContent = 'Sending...';
+
+            try {
+                const response = await fetch('/api/send-message', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ message, channel })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showStatus('Message sent successfully!', 'success');
+
+                    // Add to recent messages
+                    recentMessages.unshift({
+                        text: message,
+                        channel: channel,
+                        time: new Date().toISOString()
+                    });
+                    recentMessages = recentMessages.slice(0, 5);
+                    localStorage.setItem('recentSentMessages', JSON.stringify(recentMessages));
+                    renderRecentMessages();
+
+                    // Clear form
+                    messageInput.value = '';
+                    charCount.textContent = '0';
+                    charCountContainer.classList.remove('warning', 'danger');
+                } else {
+                    showStatus(data.error || 'Failed to send message', 'error');
+                }
+            } catch (err) {
+                showStatus('Failed to send message: ' + err.message, 'error');
+            } finally {
+                sendBtn.disabled = false;
+                sendBtn.textContent = 'Send Message';
+            }
+        });
+
+        function showStatus(message, type) {
+            statusMessage.textContent = message;
+            statusMessage.className = 'status-message ' + type;
+
+            if (type === 'success') {
+                setTimeout(() => {
+                    statusMessage.className = 'status-message';
+                }, 3000);
+            }
+        }
+
+        function renderRecentMessages() {
+            if (recentMessages.length === 0) {
+                recentList.innerHTML = '<p style="color: #6c757d; font-style: italic;">No messages sent yet</p>';
+                return;
+            }
+
+            recentList.innerHTML = recentMessages.map(msg => `
+                <div class="recent-message">
+                    <div class="message-text">${escapeHtml(msg.text)}</div>
+                    <div class="message-meta">Channel ${msg.channel} · ${formatTime(msg.time)}</div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatTime(isoString) {
+            const date = new Date(isoString);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+
+            if (diffMins < 1) return 'just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+            return date.toLocaleTimeString();
+        }
+    </script>
+</body>
+</html>

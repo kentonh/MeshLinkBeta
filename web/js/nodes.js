@@ -569,6 +569,13 @@ async function showNodeDetails(nodeId) {
                 </div>
             </div>
             ` : ''}
+
+            <div class="detail-section">
+                <h3>Battery History</h3>
+                <div id="battery-chart-container" style="height: 180px; position: relative;">
+                    <canvas id="battery-chart"></canvas>
+                </div>
+            </div>
             
             ${node.latitude && node.longitude ? `
             <div class="detail-section">
@@ -638,10 +645,101 @@ async function showNodeDetails(nodeId) {
             </div>
             ` : ''}
         `;
-        
+
+        // Load battery chart
+        loadBatteryChart(nodeId);
+
     } catch (error) {
         console.error('Failed to load node details:', error);
         modalBody.innerHTML = `<p style="color: #dc3545;">Error loading node details: ${error.message}</p>`;
+    }
+}
+
+// Battery chart instance
+let batteryChartInstance = null;
+
+// Load and render battery chart
+async function loadBatteryChart(nodeId) {
+    const container = document.getElementById('battery-chart-container');
+    const canvas = document.getElementById('battery-chart');
+
+    if (!canvas) return;
+
+    // Destroy existing chart
+    if (batteryChartInstance) {
+        batteryChartInstance.destroy();
+        batteryChartInstance = null;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/api/nodes/${encodeURIComponent(nodeId)}/battery?days=30`);
+        const data = await response.json();
+
+        if (!data.success || data.history.length === 0) {
+            container.innerHTML = '<p style="color: #6c757d; font-style: italic;">No battery data available</p>';
+            return;
+        }
+
+        // Prepare chart data
+        const labels = data.history.map(h => {
+            const date = new Date(h.received_at_utc + 'Z');
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        });
+        const values = data.history.map(h => h.battery_level);
+
+        // Downsample if too many points
+        const maxPoints = 50;
+        let chartLabels = labels;
+        let chartValues = values;
+        if (labels.length > maxPoints) {
+            const step = Math.ceil(labels.length / maxPoints);
+            chartLabels = labels.filter((_, i) => i % step === 0);
+            chartValues = values.filter((_, i) => i % step === 0);
+        }
+
+        batteryChartInstance = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: chartLabels,
+                datasets: [{
+                    label: 'Battery %',
+                    data: chartValues,
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        min: 0,
+                        max: 100,
+                        ticks: {
+                            callback: v => v + '%',
+                            font: { size: 10 }
+                        }
+                    },
+                    x: {
+                        ticks: {
+                            maxTicksLimit: 6,
+                            font: { size: 10 }
+                        }
+                    }
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error loading battery chart:', error);
+        container.innerHTML = '<p style="color: #dc3545;">Failed to load battery data</p>';
     }
 }
 

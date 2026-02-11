@@ -56,11 +56,13 @@
                 <a href="/nodes.html" class="control-btn nav-btn nav-btn-desktop">Nodes</a>
                 <a href="/traceroutes.html" class="control-btn nav-btn nav-btn-desktop">Traceroutes</a>
                 <a href="/telemetry.html" class="control-btn nav-btn nav-btn-desktop">Telemetry</a>
+                <a href="/send.html" class="control-btn nav-btn nav-btn-desktop">Send</a>
                 <select id="nav-dropdown" class="control-select nav-dropdown-mobile" onchange="if(this.value) window.location.href=this.value">
                     <option value="">Navigate...</option>
                     <option value="/nodes.html">Nodes</option>
                     <option value="/traceroutes.html">Traceroutes</option>
                     <option value="/telemetry.html">Telemetry</option>
+                    <option value="/send.html">Send</option>
                 </select>
             </div>
         </header>
@@ -159,6 +161,7 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="js/map.js"></script>
     <script>
         fetch('/api/site-config').then(r => r.json()).then(data => {

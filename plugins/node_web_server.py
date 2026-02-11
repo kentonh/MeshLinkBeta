@@ -102,7 +102,16 @@ class NodeWebServer(plugins.Base):
             except Exception as e:
                 logger.warn(f"Failed to serve telemetry.html: {e}")
                 return "<h1>Telemetry</h1><p>Telemetry page not available.</p>"
-        
+
+        @self.app.route('/send.html')
+        def send_page():
+            """Serve send message page"""
+            try:
+                return send_from_directory(web_dir, 'send.html')
+            except Exception as e:
+                logger.warn(f"Failed to serve send.html: {e}")
+                return "Send page not found", 404
+
         @self.app.route('/api/nodes', methods=['GET'])
         def get_nodes():
             """Get all nodes"""
@@ -172,7 +181,24 @@ class NodeWebServer(plugins.Base):
                     'success': False,
                     'error': str(e)
                 }), 500
-        
+
+        @self.app.route('/api/nodes/<node_id>/battery', methods=['GET'])
+        def get_node_battery(node_id):
+            """Get battery history for node"""
+            try:
+                days = int(request.args.get('days', 30))
+                history = self.db.get_battery_history(node_id, days)
+                return jsonify({
+                    'success': True,
+                    'count': len(history),
+                    'history': history
+                })
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
+
         @self.app.route('/api/topology', methods=['GET'])
         def get_topology():
             """Get network topology"""
@@ -673,6 +699,41 @@ class NodeWebServer(plugins.Base):
                     'success': False,
                     'error': str(e)
                 }), 500
+
+        @self.app.route('/api/send-message', methods=['POST'])
+        def send_message():
+            """Send a message on the mesh"""
+            try:
+                from plugins.node_tracking import NodeTracking
+
+                data = request.get_json()
+                if not data:
+                    return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+                message = data.get('message', '').strip()
+                channel = int(data.get('channel', 0))
+
+                if not message:
+                    return jsonify({'success': False, 'error': 'Message is required'}), 400
+
+                if len(message) > 228:
+                    return jsonify({'success': False, 'error': 'Message too long (max 228 characters)'}), 400
+
+                if channel < 0 or channel > 7:
+                    return jsonify({'success': False, 'error': 'Invalid channel (0-7)'}), 400
+
+                interface = NodeTracking._interface
+                if not interface:
+                    return jsonify({'success': False, 'error': 'Mesh interface not connected'}), 503
+
+                interface.sendText(message, channelIndex=channel)
+                logger.info(f"Web user sent message on channel {channel}: {message[:50]}...")
+
+                return jsonify({'success': True, 'message': 'Message sent'})
+
+            except Exception as e:
+                logger.warn(f"Error sending message: {e}")
+                return jsonify({'success': False, 'error': str(e)}), 500
 
         @self.app.route('/api/telemetry-requests', methods=['GET'])
         def get_telemetry_requests():

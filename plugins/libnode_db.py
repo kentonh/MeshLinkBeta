@@ -1165,6 +1165,33 @@ class NodeDatabase:
             logger.warn(f"Failed to get telemetry request stats: {e}")
             return {}
 
+    def get_battery_history(self, node_id: str, days: int = 30) -> List[Dict[str, Any]]:
+        """Get battery level history for a node"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+
+            cursor.execute("""
+                SELECT
+                    received_at_utc,
+                    battery_level,
+                    voltage
+                FROM packet_history
+                WHERE node_id = ?
+                  AND battery_level IS NOT NULL
+                  AND received_at_utc >= ?
+                ORDER BY received_at_utc ASC
+            """, (node_id, cutoff))
+
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.warn(f"Failed to get battery history for {node_id}: {e}")
+            return []
+
     def set_node_ignored(self, node_id: str, ignored: bool) -> bool:
         """Set or unset the ignored status for a node"""
         try:
