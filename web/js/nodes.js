@@ -325,8 +325,8 @@ function getBatteryDisplay(node) {
 // Get Location Display
 function getLocationDisplay(node) {
     if (node.latitude && node.longitude) {
-        const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${node.latitude},${node.longitude}`;
-        return `<a href="${mapsUrl}" target="_blank" style="color: #667eea;">📍 View Map</a>`;
+        const mapUrl = `/map.html?node=${encodeURIComponent(node.node_id)}`;
+        return `<a href="${mapUrl}" style="color: #667eea;">📍 View Map</a>`;
     }
     return '<span class="text-muted">No GPS</span>';
 }
@@ -584,8 +584,8 @@ async function showNodeDetails(nodeId) {
                 <div class="detail-item">
                     <span class="detail-label">Map:</span>
                     <span class="detail-value">
-                        <a href="https://www.google.com/maps/search/?api=1&query=${node.latitude},${node.longitude}" target="_blank">
-                            View on Google Maps
+                        <a href="/map.html?node=${encodeURIComponent(node.node_id)}">
+                            View on Map
                         </a>
                     </span>
                 </div>

@@ -328,9 +328,10 @@ class Plugin(Base):
                 'is_charging': bool(row['is_charging']) if row['is_charging'] is not None else None,
                 'temperature': row['temperature'],
                 'humidity': row['humidity'],
-                'pressure': row['pressure']
+                'pressure': row['pressure'],
+                'message_text': row['message_text'] if row['packet_type'] == 'TEXT_MESSAGE_APP' and 'message_text' in row.keys() else None
             }
-            # Remove None values and sensitive fields
+            # Remove None values
             packets.append({k: v for k, v in packet.items() if v is not None})
 
         logger.info(f"Exported {len(packets)} packets")

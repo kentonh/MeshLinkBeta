@@ -202,6 +202,13 @@ class NodeDatabase:
                 cursor.execute("ALTER TABLE nodes ADD COLUMN last_name_update_utc TEXT")
                 logger.info("Added last_name_update_utc column to nodes table")
 
+            # Migration: Add message_text column to packet_history if it doesn't exist
+            cursor.execute("PRAGMA table_info(packet_history)")
+            packet_columns = [row[1] for row in cursor.fetchall()]
+            if 'message_text' not in packet_columns:
+                cursor.execute("ALTER TABLE packet_history ADD COLUMN message_text TEXT")
+                logger.info("Added message_text column to packet_history table")
+
             conn.commit()
             logger.infogreen("Node tracking database initialized successfully")
             

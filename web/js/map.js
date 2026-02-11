@@ -26,7 +26,21 @@ const MAP_ZOOM = 13;
 document.addEventListener('DOMContentLoaded', function() {
     initializeMap();
     initializeControls();
-    loadMapData();
+    loadMapData().then(() => {
+        // Check for node parameter in URL to open details panel
+        const params = new URLSearchParams(window.location.search);
+        const nodeId = params.get('node');
+        if (nodeId && mapData && mapData.nodes) {
+            const node = mapData.nodes.find(n => n.id === nodeId);
+            if (node) {
+                showNodeDetails(node);
+                // Center map on the node if it has a position
+                if (node.position && node.position.lat && node.position.lon) {
+                    map.setView([node.position.lat, node.position.lon], 15);
+                }
+            }
+        }
+    });
 });
 
 // Initialize Leaflet map
