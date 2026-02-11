@@ -14,6 +14,7 @@ let overallCoverageHull = null;
 let selectedNode = null;
 let selectedShape = null;
 let timeWindow = 24;
+let nodeFilterActive = false;
 
 // Layer visibility state
 let layerVisibility = {
@@ -168,11 +169,20 @@ function initializeLayerToggles() {
     });
 }
 
-// Update visibility of map layers based on toggle state
+// Update visibility of map layers based on toggle state and node filter
 function updateLayerVisibility() {
+    const filterNodeId = nodeFilterActive && selectedNode ? selectedNode.id : null;
+
     // Direct connection lines
     directConnectionLines.forEach(line => {
-        if (layerVisibility.directLinks) {
+        let visible = layerVisibility.directLinks;
+
+        // Apply node filter if active
+        if (visible && filterNodeId && line._connData) {
+            visible = (line._connData.from === filterNodeId || line._connData.to === filterNodeId);
+        }
+
+        if (visible) {
             if (!map.hasLayer(line)) line.addTo(map);
         } else {
             if (map.hasLayer(line)) line.remove();
@@ -188,6 +198,13 @@ function updateLayerVisibility() {
         if (tier === 'hop_3' && layerVisibility.hop3Coverage) visible = true;
         if (tier === 'hop_4_plus' && layerVisibility.hop4PlusCoverage) visible = true;
 
+        // Apply node filter if active
+        if (visible && filterNodeId && shape._coverageData) {
+            const data = shape._coverageData;
+            visible = (data.relayNodeId === filterNodeId ||
+                      (data.sendingNodeIds && data.sendingNodeIds.includes(filterNodeId)));
+        }
+
         if (visible) {
             if (!map.hasLayer(shape)) shape.addTo(map);
         } else {
@@ -197,12 +214,32 @@ function updateLayerVisibility() {
 
     // Signal circles
     signalCircles.forEach(circle => {
-        if (layerVisibility.signalCircles) {
+        let visible = layerVisibility.signalCircles;
+
+        // Apply node filter if active
+        if (visible && filterNodeId && circle._nodeId) {
+            visible = (circle._nodeId === filterNodeId);
+        }
+
+        if (visible) {
             if (!map.hasLayer(circle)) circle.addTo(map);
         } else {
             if (map.hasLayer(circle)) circle.remove();
         }
     });
+}
+
+// Filter map layers to show only elements related to the selected node
+function filterLayersForNode(nodeId) {
+    nodeFilterActive = true;
+    updateLayerVisibility();
+    highlightNodeConnections(nodeId);
+}
+
+// Clear node filter and restore all layers based on visibility toggles
+function clearNodeFilter() {
+    nodeFilterActive = false;
+    updateLayerVisibility();
 }
 
 // Load map data from API
@@ -356,8 +393,13 @@ function clearMapLayers() {
     selectedShape = null;
 }
 
-// Deselect all shapes and lines
+// Deselect all shapes and lines, clear node filter
 function deselectAllShapes() {
+    // Clear node filter first
+    const wasFiltered = nodeFilterActive;
+    nodeFilterActive = false;
+    selectedNode = null;
+
     // Reset all direct connection lines to default opacity
     directConnectionLines.forEach(line => {
         line.setStyle({ opacity: DEFAULT_OPACITY });
@@ -367,11 +409,16 @@ function deselectAllShapes() {
     indirectCoverageShapes.forEach(shape => {
         shape.setStyle({
             opacity: DEFAULT_OPACITY,
-            fillOpacity: DEFAULT_OPACITY
+            fillOpacity: DEFAULT_OPACITY * 0.5
         });
     });
 
     selectedShape = null;
+
+    // Restore all layers if filter was active
+    if (wasFiltered) {
+        updateLayerVisibility();
+    }
 }
 
 // Get node color based on last heard time
@@ -443,11 +490,12 @@ function createNodeMarker(node) {
     marker.on('click', function(e) {
         L.DomEvent.stopPropagation(e);
         deselectAllShapes();
+        selectedNode = node;
         if (node.isAirplane) {
             // Airplane click goes straight to details panel (with hide option)
             showNodeDetails(node);
         } else {
-            highlightNodeConnections(node.id);
+            filterLayersForNode(node.id);
             marker.openPopup();
         }
     });
@@ -742,6 +790,9 @@ function drawSignalCoverageCircles(directConnections, nodeById) {
             pane: 'signalPane'
         });
 
+        // Store node ID for filtering
+        circle._nodeId = nodeId;
+
         // Only add to map if signal circles are enabled
         if (layerVisibility.signalCircles) {
             circle.addTo(map);
@@ -852,8 +903,8 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 function showNodeDetails(node) {
     selectedNode = node;
 
-    // Highlight related shapes
-    highlightNodeShapes(node.id);
+    // Filter and highlight related shapes
+    filterLayersForNode(node.id);
 
     const panel = document.getElementById('details-panel');
     const title = document.getElementById('details-title');
