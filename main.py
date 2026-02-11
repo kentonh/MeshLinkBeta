@@ -20,6 +20,7 @@ import plugins.libdiscordutil as DiscordUtil
 from datetime import datetime
 import math
 import plugins.libcommand as LibCommand
+import plugins.libinterface as libinterface
 
 
 def handler(signum, frame):
@@ -107,6 +108,7 @@ else:
     client = None
 
 def onConnection(interface, topic=pub.AUTO_TOPIC):
+    libinterface.set_interface(interface)
     for inst in plugin_instances:
         if hasattr(inst, "onConnect") and callable(inst.onConnect):
             inst.onConnect(interface,client)
@@ -119,6 +121,7 @@ def onReceive(packet, interface):
         cmd.onReceive(packet,interface,client)
 
 def onDisconnect(interface):
+    libinterface.clear_interface()
     for inst in plugin_instances:
         if hasattr(inst, "onDisconnect") and callable(inst.onDisconnect):
             inst.onDisconnect(interface,client)

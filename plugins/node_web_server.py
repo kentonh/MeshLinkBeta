@@ -704,7 +704,7 @@ class NodeWebServer(plugins.Base):
         def send_message():
             """Send a message on the mesh"""
             try:
-                from plugins.node_tracking import NodeTracking
+                from plugins import libinterface
 
                 data = request.get_json()
                 if not data:
@@ -722,7 +722,7 @@ class NodeWebServer(plugins.Base):
                 if channel < 0 or channel > 7:
                     return jsonify({'success': False, 'error': 'Invalid channel (0-7)'}), 400
 
-                interface = NodeTracking._interface
+                interface = libinterface.get_interface()
                 if not interface:
                     return jsonify({'success': False, 'error': 'Mesh interface not connected'}), 503
 
