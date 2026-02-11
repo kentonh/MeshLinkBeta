@@ -151,9 +151,9 @@ function updateLayerVisibility() {
     // Direct connection lines
     directConnectionLines.forEach(line => {
         if (layerVisibility.directLinks) {
-            line.addTo(map);
+            if (!map.hasLayer(line)) line.addTo(map);
         } else {
-            line.remove();
+            if (map.hasLayer(line)) line.remove();
         }
     });
 
@@ -166,18 +166,18 @@ function updateLayerVisibility() {
         if (tier === 'hop_4_plus' && layerVisibility.hop4PlusCoverage) visible = true;
 
         if (visible) {
-            shape.addTo(map);
+            if (!map.hasLayer(shape)) shape.addTo(map);
         } else {
-            shape.remove();
+            if (map.hasLayer(shape)) shape.remove();
         }
     });
 
     // Signal circles
     signalCircles.forEach(circle => {
         if (layerVisibility.signalCircles) {
-            circle.addTo(map);
+            if (!map.hasLayer(circle)) circle.addTo(map);
         } else {
-            circle.remove();
+            if (map.hasLayer(circle)) circle.remove();
         }
     });
 }
