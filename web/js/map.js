@@ -208,9 +208,13 @@ async function loadMapData(silent = false) {
 
 // Update statistics display
 function updateStats(stats) {
-    document.getElementById('stat-nodes').textContent = stats.totalNodes || 0;
-    document.getElementById('stat-direct').textContent = stats.directConnections || 0;
-    document.getElementById('stat-indirect').textContent = stats.indirectCoverage || 0;
+    const nodesEl = document.getElementById('stat-nodes');
+    const directEl = document.getElementById('stat-direct');
+    const indirectEl = document.getElementById('stat-indirect');
+
+    if (nodesEl) nodesEl.textContent = stats.totalNodes || 0;
+    if (directEl) directEl.textContent = stats.directConnections || 0;
+    if (indirectEl) indirectEl.textContent = stats.indirectCoverage || 0;
 
     // Update hop distribution stats if elements exist
     const hopDist = stats.hopDistribution || {};
