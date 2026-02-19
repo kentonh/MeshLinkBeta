@@ -23,6 +23,16 @@ message_role: "@here" # the role on discord to ping on messages, if you dont wan
 permit_broadcast_of_discord_messages: True # allow messages from discord to be transmitted to your selected channel
 send_mesh_commands_to_discord: True # send responses to mesh commands to discord
 
+### RESPONSE DELAY (OPTIONAL - defaults work out-of-box)
+# Prevents packet collisions when multiple MeshLinkBeta nodes respond to commands
+# Uses combined delay: (hops * hop_delay) + (node_slot * slot_duration) + jitter
+# response_delay:
+#   enabled: true               # Enabled by default; set false for single-node
+#   hop_delay_seconds: 0.1      # 100ms per hop (closer nodes respond first)
+#   slot_count: 8               # Time slots for node distribution
+#   slot_duration_seconds: 0.25 # 250ms per slot
+#   jitter_max_seconds: 0.25    # Random jitter range
+
 ### MESH AND RADIO SETTINGS
 prefix: "$" # mesh command prefix
 use_serial: True # set to False if using tcp
