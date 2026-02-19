@@ -28,10 +28,10 @@ send_mesh_commands_to_discord: True # send responses to mesh commands to discord
 # Uses combined delay: (hops * hop_delay) + (node_slot * slot_duration) + jitter
 # response_delay:
 #   enabled: true               # Enabled by default; set false for single-node
-#   hop_delay_seconds: 0.1      # 100ms per hop (closer nodes respond first)
+#   hop_delay_seconds: 0.25      # 100ms per hop (closer nodes respond first)
 #   slot_count: 8               # Time slots for node distribution
 #   slot_duration_seconds: 0.25 # 250ms per slot
-#   jitter_max_seconds: 0.25    # Random jitter range
+#   jitter_max_seconds: 0.1    # Random jitter range
 
 ### MESH AND RADIO SETTINGS
 prefix: "$" # mesh command prefix

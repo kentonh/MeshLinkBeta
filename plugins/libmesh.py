@@ -7,10 +7,10 @@ import time
 # Built-in defaults for response delay - works without any config
 RESPONSE_DELAY_DEFAULTS = {
     'enabled': True,
-    'hop_delay_seconds': 0.1,       # 100ms per hop
+    'hop_delay_seconds': 0.25,       # 100ms per hop
     'slot_count': 8,
     'slot_duration_seconds': 0.25,  # 250ms per slot
-    'jitter_max_seconds': 0.25
+    'jitter_max_seconds': 0.1
 }
 
 def getUserLong(interface,packet):
