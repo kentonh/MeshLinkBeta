@@ -385,6 +385,7 @@ class NodeTracking(plugins.Base):
                 'rx_rssi': packet.get('rxRssi'),
                 'packet_id': packet.get('id'),
                 'reply_id': decoded.get('replyId'),
+                'emoji': decoded.get('emoji'),
                 'raw_packet': self._serialize_packet(packet)
             }
 

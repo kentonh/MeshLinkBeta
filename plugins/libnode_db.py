@@ -97,6 +97,7 @@ class NodeDatabase:
                     message_text TEXT,
                     packet_id INTEGER,
                     reply_id INTEGER,
+                    emoji INTEGER,
                     raw_packet TEXT,
                     FOREIGN KEY (node_id) REFERENCES nodes(node_id)
                 )
@@ -216,6 +217,9 @@ class NodeDatabase:
             if 'reply_id' not in packet_columns:
                 cursor.execute("ALTER TABLE packet_history ADD COLUMN reply_id INTEGER")
                 logger.info("Added reply_id column to packet_history table")
+            if 'emoji' not in packet_columns:
+                cursor.execute("ALTER TABLE packet_history ADD COLUMN emoji INTEGER")
+                logger.info("Added emoji column to packet_history table")
 
             conn.commit()
             logger.infogreen("Node tracking database initialized successfully")
@@ -653,7 +657,7 @@ class NodeDatabase:
                 LEFT JOIN nodes n ON ph.node_id = n.node_id
                 WHERE ph.message_text IS NOT NULL AND ph.message_text != ''
                   AND ph.packet_type = 'TEXT_MESSAGE_APP'
-                  AND (ph.reply_id IS NULL OR length(ph.message_text) > 1)
+                  AND (ph.emoji IS NULL OR ph.emoji = 0)
                 ORDER BY ph.received_at_utc DESC
                 LIMIT ?
             """, (limit,))
@@ -673,7 +677,7 @@ class NodeDatabase:
                     WHERE r.reply_id IN ({placeholders})
                       AND r.packet_type = 'TEXT_MESSAGE_APP'
                       AND r.reply_id IS NOT NULL
-                      AND length(r.message_text) = 1
+                      AND r.emoji IS NOT NULL AND r.emoji != 0
                     ORDER BY r.received_at_utc ASC
                 """, packet_ids)
 
