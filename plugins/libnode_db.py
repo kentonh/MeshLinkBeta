@@ -642,6 +642,7 @@ class NodeDatabase:
                 FROM packet_history ph
                 LEFT JOIN nodes n ON ph.node_id = n.node_id
                 WHERE ph.message_text IS NOT NULL AND ph.message_text != ''
+                  AND ph.packet_type = 'TEXT_MESSAGE_APP'
                 ORDER BY ph.received_at_utc DESC
                 LIMIT ?
             """, (limit,))
