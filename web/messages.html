@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="page-title">Messages</title>
+    <link rel="stylesheet" href="css/nodes.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1 id="page-header">Messages</h1>
+            <div class="stats-bar">
+                <div class="stat">
+                    <span class="stat-label">Total Messages:</span>
+                    <span id="stat-total-messages" class="stat-value">0</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-label">Unique Senders:</span>
+                    <span id="stat-unique-senders" class="stat-value">0</span>
+                </div>
+            </div>
+        </header>
+
+        <nav class="tab-nav">
+            <a href="/nodes.html" class="tab-btn">Nodes</a>
+            <a href="/map.html" class="tab-btn">Map</a>
+            <a href="/traceroutes.html" class="tab-btn">Traceroutes</a>
+            <a href="/telemetry.html" class="tab-btn">Telemetry</a>
+            <a href="/messages.html" class="tab-btn active">Messages</a>
+        </nav>
+
+        <div class="tab-content active">
+            <div class="controls">
+                <input type="text" id="search" placeholder="Search messages..." class="search-box">
+                <select id="limit-select" class="filter-select">
+                    <option value="50">Show 50</option>
+                    <option value="100">Show 100</option>
+                    <option value="200" selected>Show 200</option>
+                    <option value="500">Show 500</option>
+                </select>
+                <select id="channel-filter" class="filter-select">
+                    <option value="">All Channels</option>
+                    <option value="0">Channel 0</option>
+                    <option value="1">Channel 1</option>
+                    <option value="2">Channel 2</option>
+                    <option value="3">Channel 3</option>
+                    <option value="4">Channel 4</option>
+                    <option value="5">Channel 5</option>
+                    <option value="6">Channel 6</option>
+                    <option value="7">Channel 7</option>
+                </select>
+                <button id="refresh-btn" class="refresh-btn">Refresh</button>
+            </div>
+
+            <div class="table-container">
+                <table id="messages-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable sort-desc" data-sort="time">Time</th>
+                            <th class="sortable" data-sort="sender">Sender</th>
+                            <th>Message</th>
+                            <th class="sortable" data-sort="channel">Ch</th>
+                            <th class="sortable" data-sort="hops">Hops</th>
+                            <th>Signal</th>
+                        </tr>
+                    </thead>
+                    <tbody id="messages-tbody">
+                        <tr>
+                            <td colspan="6" class="loading">Loading messages...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/messages.js"></script>
+    <script>
+        fetch('/api/site-config').then(r => r.json()).then(data => {
+            if (data.success && data.botName) {
+                document.getElementById('page-title').textContent = data.botName + ' Messages';
+                document.getElementById('page-header').textContent = data.botName + ' Messages';
+            }
+        }).catch(() => {});
+    </script>
+</body>
+</html>

@@ -628,6 +628,31 @@ class NodeDatabase:
             logger.warn(f"Failed to insert traceroute: {e}")
             return None
 
+    def get_text_messages(self, limit: int = 200) -> List[Dict[str, Any]]:
+        """Get all text messages from packet_history"""
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT ph.id, ph.node_id, ph.received_at_utc, ph.message_text,
+                       ph.channel_index, ph.hops_away, ph.rx_snr, ph.rx_rssi,
+                       ph.relay_node_id, ph.relay_node_name,
+                       n.long_name as sender_long_name, n.short_name as sender_short_name
+                FROM packet_history ph
+                LEFT JOIN nodes n ON ph.node_id = n.node_id
+                WHERE ph.message_text IS NOT NULL AND ph.message_text != ''
+                ORDER BY ph.received_at_utc DESC
+                LIMIT ?
+            """, (limit,))
+
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        except Exception as e:
+            logger.warn(f"Failed to get text messages: {e}")
+            return []
+
     def get_all_traceroutes(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Get all traceroutes ordered by most recent"""
         try:

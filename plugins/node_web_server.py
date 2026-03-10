@@ -112,6 +112,15 @@ class NodeWebServer(plugins.Base):
                 logger.warn(f"Failed to serve send.html: {e}")
                 return "Send page not found", 404
 
+        @self.app.route('/messages.html')
+        def messages_page():
+            """Serve text messages page"""
+            try:
+                return send_from_directory(web_dir, 'messages.html')
+            except Exception as e:
+                logger.warn(f"Failed to serve messages.html: {e}")
+                return "Messages page not found", 404
+
         @self.app.route('/api/nodes', methods=['GET'])
         def get_nodes():
             """Get all nodes"""
@@ -796,6 +805,24 @@ class NodeWebServer(plugins.Base):
             except Exception as e:
                 logger.warn(f"Error sending message: {e}")
                 return jsonify({'success': False, 'error': str(e)}), 500
+
+        @self.app.route('/api/messages', methods=['GET'])
+        def get_messages():
+            """Get text messages"""
+            try:
+                limit = int(request.args.get('limit', 200))
+                messages = self.db.get_text_messages(limit)
+                return jsonify({
+                    'success': True,
+                    'count': len(messages),
+                    'messages': messages
+                })
+            except Exception as e:
+                logger.warn(f"Error getting messages: {e}")
+                return jsonify({
+                    'success': False,
+                    'error': str(e)
+                }), 500
 
         @self.app.route('/api/telemetry-requests', methods=['GET'])
         def get_telemetry_requests():
