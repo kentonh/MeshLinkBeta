@@ -383,6 +383,8 @@ class NodeTracking(plugins.Base):
                 'via_mqtt': packet.get('viaMqtt', False),
                 'rx_snr': packet.get('rxSnr'),
                 'rx_rssi': packet.get('rxRssi'),
+                'packet_id': packet.get('id'),
+                'reply_id': decoded.get('replyId'),
                 'raw_packet': self._serialize_packet(packet)
             }
 

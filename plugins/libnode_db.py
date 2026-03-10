@@ -95,6 +95,8 @@ class NodeDatabase:
                     humidity REAL,
                     pressure REAL,
                     message_text TEXT,
+                    packet_id INTEGER,
+                    reply_id INTEGER,
                     raw_packet TEXT,
                     FOREIGN KEY (node_id) REFERENCES nodes(node_id)
                 )
@@ -208,6 +210,12 @@ class NodeDatabase:
             if 'message_text' not in packet_columns:
                 cursor.execute("ALTER TABLE packet_history ADD COLUMN message_text TEXT")
                 logger.info("Added message_text column to packet_history table")
+            if 'packet_id' not in packet_columns:
+                cursor.execute("ALTER TABLE packet_history ADD COLUMN packet_id INTEGER")
+                logger.info("Added packet_id column to packet_history table")
+            if 'reply_id' not in packet_columns:
+                cursor.execute("ALTER TABLE packet_history ADD COLUMN reply_id INTEGER")
+                logger.info("Added reply_id column to packet_history table")
 
             conn.commit()
             logger.infogreen("Node tracking database initialized successfully")
@@ -629,26 +637,64 @@ class NodeDatabase:
             return None
 
     def get_text_messages(self, limit: int = 200) -> List[Dict[str, Any]]:
-        """Get all text messages from packet_history"""
+        """Get all text messages from packet_history with tapback reactions"""
         try:
             conn = self._get_connection()
             cursor = conn.cursor()
 
+            # Get text messages (exclude tapback replies)
             cursor.execute("""
                 SELECT ph.id, ph.node_id, ph.received_at_utc, ph.message_text,
                        ph.channel_index, ph.hops_away, ph.rx_snr, ph.rx_rssi,
                        ph.relay_node_id, ph.relay_node_name,
+                       ph.packet_id, ph.reply_id,
                        n.long_name as sender_long_name, n.short_name as sender_short_name
                 FROM packet_history ph
                 LEFT JOIN nodes n ON ph.node_id = n.node_id
                 WHERE ph.message_text IS NOT NULL AND ph.message_text != ''
                   AND ph.packet_type = 'TEXT_MESSAGE_APP'
+                  AND (ph.reply_id IS NULL OR length(ph.message_text) > 1)
                 ORDER BY ph.received_at_utc DESC
                 LIMIT ?
             """, (limit,))
 
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            messages = [dict(row) for row in rows]
+
+            # Collect all packet_ids to find reactions for them
+            packet_ids = [m['packet_id'] for m in messages if m.get('packet_id')]
+            if packet_ids:
+                placeholders = ','.join(['?' for _ in packet_ids])
+                cursor.execute(f"""
+                    SELECT r.reply_id, r.message_text as emoji, r.node_id,
+                           n.long_name, n.short_name
+                    FROM packet_history r
+                    LEFT JOIN nodes n ON r.node_id = n.node_id
+                    WHERE r.reply_id IN ({placeholders})
+                      AND r.packet_type = 'TEXT_MESSAGE_APP'
+                      AND r.reply_id IS NOT NULL
+                      AND length(r.message_text) = 1
+                    ORDER BY r.received_at_utc ASC
+                """, packet_ids)
+
+                # Group reactions by reply_id
+                reactions_by_id = {}
+                for row in cursor.fetchall():
+                    rid = row['reply_id']
+                    if rid not in reactions_by_id:
+                        reactions_by_id[rid] = []
+                    reactions_by_id[rid].append({
+                        'emoji': row['emoji'],
+                        'from': row['long_name'] or row['short_name'] or row['node_id']
+                    })
+
+                # Attach reactions to their messages
+                for msg in messages:
+                    pid = msg.get('packet_id')
+                    if pid and pid in reactions_by_id:
+                        msg['reactions'] = reactions_by_id[pid]
+
+            return messages
 
         except Exception as e:
             logger.warn(f"Failed to get text messages: {e}")

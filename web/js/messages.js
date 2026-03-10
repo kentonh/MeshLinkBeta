@@ -77,11 +77,20 @@ function displayMessages(messages) {
         // Escape HTML in message text
         const escapedText = escapeHtml(msg.message_text);
 
+        // Build reactions display
+        let reactionsHtml = '';
+        if (msg.reactions && msg.reactions.length > 0) {
+            const reactionPills = msg.reactions.map(r =>
+                `<span class="reaction-pill" title="${escapeHtml(r.from)}">${r.emoji}</span>`
+            ).join('');
+            reactionsHtml = `<div class="reactions-row">${reactionPills}</div>`;
+        }
+
         return `
             <tr>
                 <td>${relTime}<br><small>${date.toLocaleString()}</small></td>
                 <td><a href="/nodes.html?node=${encodeURIComponent(msg.node_id)}" class="hop-link"><strong>${escapeHtml(senderName)}</strong></a><br><small>${shortId}</small></td>
-                <td class="message-text">${escapedText}</td>
+                <td class="message-text">${escapedText}${reactionsHtml}</td>
                 <td class="center">${msg.channel_index !== null ? msg.channel_index : '?'}</td>
                 <td class="center">${hops}</td>
                 <td class="center"><small>${signal}</small></td>
