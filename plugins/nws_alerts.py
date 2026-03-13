@@ -36,6 +36,7 @@ mesh_interface = None
 discord_client = None
 last_check_time = None
 alert_state = {}
+alert_state_initialized = False
 thread_started = False
 startup_delay_applied = False
 retry_after_failure = False
@@ -210,6 +211,7 @@ def check_alerts():
     global last_check_time
     global retry_after_failure
     global failure_retry_used
+    global alert_state_initialized
 
     with state_lock:
         interface = mesh_interface
@@ -256,25 +258,32 @@ def check_alerts():
 
         with state_lock:
             previous_alerts = dict(alert_state)
+            first_successful_snapshot = not alert_state_initialized
 
-            for alert_id, details in active_alerts.items():
-                previous = previous_alerts.get(alert_id)
-                if previous is None:
-                    outbound_messages.append(
-                        _build_new_message(details["event"], details["ends"])
-                    )
-                elif previous.get("ends") != details["ends"]:
-                    outbound_messages.append(
-                        _build_updated_message(details["event"], details["ends"])
-                    )
+            if not first_successful_snapshot:
+                for alert_id, details in active_alerts.items():
+                    previous = previous_alerts.get(alert_id)
+                    if previous is None:
+                        outbound_messages.append(
+                            _build_new_message(details["event"], details["ends"])
+                        )
+                    elif previous.get("ends") != details["ends"]:
+                        outbound_messages.append(
+                            _build_updated_message(details["event"], details["ends"])
+                        )
 
             alert_state.clear()
             alert_state.update(active_alerts)
+            alert_state_initialized = True
             last_check_time = check_started
             retry_after_failure = False
             failure_retry_used = False
 
-        if outbound_messages:
+        if first_successful_snapshot:
+            print(
+                f"[NWS] Initialized alert state with {len(active_alerts)} active watch/warning alert(s)"
+            )
+        elif outbound_messages:
             print(f"[NWS] Found {len(outbound_messages)} alert change(s)")
         else:
             print("[NWS] No new or updated alerts")
