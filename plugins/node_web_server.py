@@ -267,15 +267,21 @@ class NodeWebServer(plugins.Base):
         
         @self.app.route('/api/topology/hop-graph', methods=['GET'])
         def get_hop_topology():
-            """Get topology organized by hop distance from local node"""
+            """Get topology organized by hop distance from local node (last 7 days)"""
             try:
-                # Get all nodes and their recent packets
-                nodes = self.db.get_all_nodes()
+                from datetime import datetime, timedelta
+
+                # 7-day time window
+                time_cutoff = (datetime.utcnow() - timedelta(days=7)).isoformat()
+
+                # Get all nodes seen in the last 7 days
+                all_nodes = self.db.get_all_nodes()
+                nodes = [n for n in all_nodes if (n.get('last_seen_utc') or '') >= time_cutoff]
 
                 # Build hop-based graph
                 graph_nodes = []
                 graph_edges = []
-                direct_nodes = []
+                edge_set = set()  # Track unique edges to avoid duplicates
 
                 # Add a virtual "Self" node representing the local device
                 graph_nodes.append({
@@ -283,7 +289,7 @@ class NodeWebServer(plugins.Base):
                     'label': 'Self (This Device)',
                     'short_name': 'Self',
                     'long_name': 'Self (This Device)',
-                    'hops': -1,  # Special marker for local node
+                    'hops': -1,
                     'battery': None,
                     'lastSeen': None,
                     'relay_via': None
@@ -293,24 +299,24 @@ class NodeWebServer(plugins.Base):
                 for node in nodes:
                     node_id = node['node_id']
 
-                    # Get recent packets from this node to determine hop count
-                    packets = self.db.get_node_packets(node_id, limit=20)
+                    # Get packets from the last 7 days
+                    packets = self.db.get_node_packets(node_id, limit=200)
+                    recent_packets = [p for p in packets if (p.get('received_at_utc') or '') >= time_cutoff]
 
-                    # Determine minimum hop count and relay node
+                    # Determine minimum hop count and all relay nodes
                     min_hops = None
-                    relay_via = None
+                    relay_nodes = set()
 
-                    for pkt in packets:
+                    for pkt in recent_packets:
                         hops = pkt.get('hops_away')
                         if hops is not None:
-                            # Track minimum hop count
                             if min_hops is None or hops < min_hops:
                                 min_hops = hops
 
-                            # Get relay_via from most recent packet with hops > 0
-                            # (not from the minimum hop packet, since that might be direct)
-                            if hops > 0 and relay_via is None:
-                                relay_via = pkt.get('relay_node_id')
+                            if hops > 0:
+                                relay_id = pkt.get('relay_node_id')
+                                if relay_id and isinstance(relay_id, str) and relay_id.startswith('!'):
+                                    relay_nodes.add(relay_id)
 
                     # Add node to graph
                     graph_nodes.append({
@@ -321,30 +327,29 @@ class NodeWebServer(plugins.Base):
                         'hops': min_hops if min_hops is not None else 99,
                         'battery': node.get('battery_level'),
                         'lastSeen': node.get('last_seen_utc'),
-                        'relay_via': relay_via
+                        'relay_via': list(relay_nodes) if relay_nodes else None
                     })
 
                     # Create edges based on hop count
                     if min_hops == 0:
-                        # Direct connection to local node
-                        direct_nodes.append(node_id)
-                        graph_edges.append({
-                            'from': 'LOCAL_NODE',
-                            'to': node_id,
-                            'hops': 0
-                        })
-                    elif relay_via and min_hops and min_hops > 0:
-                        # Relayed through another node
-                        # Only add edge if relay_via is a valid full node ID (starts with !)
-                        if isinstance(relay_via, str) and relay_via.startswith('!'):
+                        edge_key = ('LOCAL_NODE', node_id)
+                        if edge_key not in edge_set:
+                            edge_set.add(edge_key)
                             graph_edges.append({
-                                'from': relay_via,
+                                'from': 'LOCAL_NODE',
                                 'to': node_id,
-                                'hops': min_hops
+                                'hops': 0
                             })
-                        else:
-                            # Skip invalid relay IDs (partial IDs from relay matching)
-                            pass
+                    elif min_hops and min_hops > 0:
+                        for relay_id in relay_nodes:
+                            edge_key = (relay_id, node_id)
+                            if edge_key not in edge_set:
+                                edge_set.add(edge_key)
+                                graph_edges.append({
+                                    'from': relay_id,
+                                    'to': node_id,
+                                    'hops': min_hops
+                                })
 
                 return jsonify({
                     'success': True,

@@ -1068,7 +1068,7 @@ function renderTopology() {
 
         infoContainer.innerHTML = `
             <div style="padding: 15px; background: #f8f9fa; border-radius: 8px; margin-top: 15px;">
-                <h4 style="margin-top: 0; color: #667eea;">Network Summary</h4>
+                <h4 style="margin-top: 0; color: #667eea;">Network Summary <span style="font-weight: normal; font-size: 0.85em; color: #6c757d;">(last 7 days)</span></h4>
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
                     <div style="padding: 10px; background: white; border-radius: 4px; border-left: 4px solid #667eea;">
                         <strong>Local Device:</strong> Self
