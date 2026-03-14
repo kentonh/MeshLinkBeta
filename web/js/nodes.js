@@ -860,8 +860,8 @@ function renderTopology() {
             });
         });
 
-        // Create links - filter to valid nodes and quality threshold
-        const links = topologyData.edges
+        // Create all links - filter to valid nodes and quality threshold
+        const allLinks = topologyData.edges
             .filter(edge => {
                 if (!nodeMap.has(edge.from) || !nodeMap.has(edge.to)) return false;
                 if (minQuality > 0 && edge.quality !== undefined && edge.quality < minQuality) return false;
@@ -870,15 +870,60 @@ function renderTopology() {
             .map(edge => ({
                 source: edge.from,
                 target: edge.to,
-                hops: edge.hops
+                hops: edge.hops,
+                packet_count: edge.packet_count || 0,
+                avg_snr: edge.avg_snr
             }));
 
+        // Split into primary (top 3 per target) and secondary edges
+        function selectPrimaryEdges(edges) {
+            const primaryEdges = [];
+            const secondaryEdges = [];
+            // Group by target node
+            const byTarget = new Map();
+            edges.forEach(e => {
+                const tgt = e.target;
+                if (!byTarget.has(tgt)) byTarget.set(tgt, []);
+                byTarget.get(tgt).push(e);
+            });
+            byTarget.forEach((edgesForNode) => {
+                // Direct (LOCAL_NODE) edges are always primary
+                const direct = edgesForNode.filter(e => e.source === 'LOCAL_NODE');
+                const relayed = edgesForNode.filter(e => e.source !== 'LOCAL_NODE');
+                // Sort relayed by packet_count desc, then avg_snr desc
+                relayed.sort((a, b) => {
+                    if (b.packet_count !== a.packet_count) return b.packet_count - a.packet_count;
+                    return (b.avg_snr || -999) - (a.avg_snr || -999);
+                });
+                const top3 = relayed.slice(0, 3);
+                const rest = relayed.slice(3);
+                primaryEdges.push(...direct, ...top3);
+                secondaryEdges.push(...rest);
+            });
+            return { primaryEdges, secondaryEdges };
+        }
+
+        const { primaryEdges, secondaryEdges } = selectPrimaryEdges(allLinks);
+        const links = primaryEdges;
+
         const nodes = Array.from(nodeMap.values());
+
+        // Build adjacency map for hover lookups (node id -> set of connected node ids)
+        const adjacency = new Map();
+        function addAdj(a, b) {
+            if (!adjacency.has(a)) adjacency.set(a, new Set());
+            adjacency.get(a).add(b);
+        }
+        allLinks.forEach(e => { addAdj(e.source, e.target); addAdj(e.target, e.source); });
+
+        // Build nodeById map for resolving secondary links
+        const nodeById = new Map();
+        nodes.forEach(n => nodeById.set(n.id, n));
 
         // Set initial positions in radial layout based on hop count
         const centerX = width / 2;
         const centerY = height / 2;
-        const radiusStep = 250;
+        const radiusStep = 200;
 
         // Group nodes by their relay node for clustering
         const clusterMap = new Map();
@@ -950,14 +995,14 @@ function renderTopology() {
                     return 0.1;
                 }))
             .force('charge', d3.forceManyBody()
-                .strength(-150)
+                .strength(-120)
                 .distanceMax(500))
             .force('collision', d3.forceCollide().radius(d => d.hops === -1 ? 45 : 30))
             .force('radial', d3.forceRadial(
                 d => (d.hops + 1) * radiusStep,
                 centerX,
                 centerY
-            ).strength(0.8));
+            ).strength(0.7));
 
         topologySimulation = simulation;
 
@@ -976,7 +1021,31 @@ function renderTopology() {
             .attr('fill', '#bbb')
             .attr('fill-opacity', 0.5);
 
-        // Create curved edge paths with visual hierarchy
+        // Resolve secondary link source/target strings to node objects
+        const resolvedSecondary = secondaryEdges.map(e => ({
+            source: nodeById.get(e.source) || e.source,
+            target: nodeById.get(e.target) || e.target,
+            hops: e.hops,
+            packet_count: e.packet_count,
+            avg_snr: e.avg_snr
+        }));
+
+        // Create secondary edge paths (hidden by default)
+        const secondaryGroup = container.append('g')
+            .attr('class', 'secondary-links')
+            .style('display', 'none');
+
+        const secondaryLink = secondaryGroup.selectAll('path')
+            .data(resolvedSecondary)
+            .enter()
+            .append('path')
+            .attr('fill', 'none')
+            .attr('stroke', '#ccc')
+            .attr('stroke-width', 0.5)
+            .attr('stroke-opacity', 0.3)
+            .attr('stroke-dasharray', '4,3');
+
+        // Create curved primary edge paths with visual hierarchy
         const link = container.append('g')
             .attr('class', 'links')
             .selectAll('path')
@@ -1021,6 +1090,30 @@ function renderTopology() {
                 event.stopPropagation();
                 showNodeDetails(d.id);
             })
+            .on('mouseenter', (event, d) => {
+                const connected = adjacency.get(d.id) || new Set();
+                // Dim unconnected nodes
+                node.style('opacity', n => (n.id === d.id || connected.has(n.id)) ? 1 : 0.15);
+                // Dim unconnected primary edges
+                link.style('opacity', e => {
+                    const src = (typeof e.source === 'object') ? e.source.id : e.source;
+                    const tgt = (typeof e.target === 'object') ? e.target.id : e.target;
+                    return (src === d.id || tgt === d.id) ? null : 0.05;
+                });
+                // Show secondary edges for this node
+                secondaryGroup.style('display', null);
+                secondaryLink.style('display', e => {
+                    const src = (typeof e.source === 'object') ? e.source.id : e.source;
+                    const tgt = (typeof e.target === 'object') ? e.target.id : e.target;
+                    return (src === d.id || tgt === d.id) ? null : 'none';
+                });
+            })
+            .on('mouseleave', () => {
+                node.style('opacity', 1);
+                link.style('opacity', null);
+                secondaryGroup.style('display', 'none');
+                secondaryLink.style('display', null);
+            })
             .style('cursor', 'pointer');
 
         // Add circles — smaller sizes
@@ -1055,6 +1148,7 @@ function renderTopology() {
         // Update positions on each tick
         simulation.on('tick', () => {
             link.attr('d', arcPath);
+            secondaryLink.attr('d', arcPath);
             node.attr('transform', d => `translate(${d.x},${d.y})`);
         });
 
@@ -1109,6 +1203,9 @@ function renderTopology() {
                     </div>
                     <div style="padding: 10px; background: white; border-radius: 4px; border-left: 4px solid #667eea;">
                         <strong>Total Nodes:</strong> ${totalNodes}
+                    </div>
+                    <div style="padding: 10px; background: white; border-radius: 4px; border-left: 4px solid #764ba2;">
+                        <strong>Connections:</strong> ${links.length} primary shown (${secondaryEdges.length} alternate, hover to see)
                     </div>
                 </div>
             </div>

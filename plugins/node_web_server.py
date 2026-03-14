@@ -303,9 +303,9 @@ class NodeWebServer(plugins.Base):
                     packets = self.db.get_node_packets(node_id, limit=200)
                     recent_packets = [p for p in packets if (p.get('received_at_utc') or '') >= time_cutoff]
 
-                    # Determine minimum hop count and all relay nodes
+                    # Determine minimum hop count and per-relay stats
                     min_hops = None
-                    relay_nodes = set()
+                    relay_stats = {}  # keyed by relay_id
 
                     for pkt in recent_packets:
                         hops = pkt.get('hops_away')
@@ -316,7 +316,16 @@ class NodeWebServer(plugins.Base):
                             if hops > 0:
                                 relay_id = pkt.get('relay_node_id')
                                 if relay_id and isinstance(relay_id, str) and relay_id.startswith('!'):
-                                    relay_nodes.add(relay_id)
+                                    if relay_id not in relay_stats:
+                                        relay_stats[relay_id] = {'count': 0, 'snr_sum': 0.0, 'snr_count': 0}
+                                    relay_stats[relay_id]['count'] += 1
+                                    rx_snr = pkt.get('rx_snr')
+                                    if rx_snr is not None:
+                                        try:
+                                            relay_stats[relay_id]['snr_sum'] += float(rx_snr)
+                                            relay_stats[relay_id]['snr_count'] += 1
+                                        except (ValueError, TypeError):
+                                            pass
 
                     # Add node to graph
                     graph_nodes.append({
@@ -327,7 +336,7 @@ class NodeWebServer(plugins.Base):
                         'hops': min_hops if min_hops is not None else 99,
                         'battery': node.get('battery_level'),
                         'lastSeen': node.get('last_seen_utc'),
-                        'relay_via': list(relay_nodes) if relay_nodes else None
+                        'relay_via': list(relay_stats.keys()) if relay_stats else None
                     })
 
                     # Create edges based on hop count
@@ -338,17 +347,22 @@ class NodeWebServer(plugins.Base):
                             graph_edges.append({
                                 'from': 'LOCAL_NODE',
                                 'to': node_id,
-                                'hops': 0
+                                'hops': 0,
+                                'packet_count': len(recent_packets),
+                                'avg_snr': None
                             })
                     elif min_hops and min_hops > 0:
-                        for relay_id in relay_nodes:
+                        for relay_id, stats in relay_stats.items():
                             edge_key = (relay_id, node_id)
                             if edge_key not in edge_set:
                                 edge_set.add(edge_key)
+                                avg_snr = round(stats['snr_sum'] / stats['snr_count'], 1) if stats['snr_count'] > 0 else None
                                 graph_edges.append({
                                     'from': relay_id,
                                     'to': node_id,
-                                    'hops': min_hops
+                                    'hops': min_hops,
+                                    'packet_count': stats['count'],
+                                    'avg_snr': avg_snr
                                 })
 
                 return jsonify({
