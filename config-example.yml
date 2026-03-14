@@ -140,3 +140,15 @@ federated_uploader:
   export_interval_minutes: 60           # How often to export (in minutes)
   nodes_db_path: "./nodes.db"           # Path to nodes database
   export_hours_lookback: 2              # How many hours of data to export each time (overlapping to prevent gaps)
+
+### NWS ALERTS
+use_nws_alerts: False # Set to True to enable National Weather Service alerts plugin. This plugin will check for active alerts in the specified area and transmit them on the mesh network.
+nws_latitude: 37.6872 # Enter the latitude for the location you want National Weather Service alerts for.
+nws_longitude: -97.3301 # Enter the longitude for the location you want National Weather Service alerts for.
+nws_check_interval: 300 # Set how often, in seconds, the bot should poll NWS for new alerts.
+nws_alert_channel: 0 # Set the mesh channel index where NWS alerts should be transmitted.
+nws_initial_startup_delay: 30 # Set how many seconds the bot should wait after startup before its first NWS check.
+nws_request_timeout: 20 # Set the HTTP timeout, in seconds, for NWS API requests.
+nws_failure_retry_delay: 60 # Set how many seconds to wait before retrying after an NWS request failure.
+nws_agent_name: "Flyover-Mesh-NWS-Alerts" # Enter the user-agent/app name sent to NWS; use a name that identifies your deployment.
+nws_contact: "phone & name" # Enter contact information required by NWS so they can reach the operator if needed.

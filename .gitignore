@@ -23,3 +23,5 @@ init_database.py
 nodes.db
 test_meshmonitor_connection.py
 test_relay_node.py
+# VS Code workspace files
+MeshLinkBeta.code-workspace
