@@ -22,6 +22,7 @@ let topologySvg = null;
 document.addEventListener('DOMContentLoaded', function() {
     initializeTabs();
     initializeControls();
+    initTopologyControls();
     initializeModal();
     loadStatistics();
     loadNodes().then(() => {
@@ -755,11 +756,6 @@ async function loadTopology() {
         const response = await fetch(`${API_BASE}/api/topology/hop-graph`);
         const data = await response.json();
 
-        console.log('API Response:', data);
-        console.log('Nodes received:', data.nodes?.length);
-        console.log('Edges received:', data.edges?.length);
-        console.log('Raw edges:', data.edges);
-
         if (data.success) {
             topologyData = data;
             renderTopology();
@@ -772,31 +768,48 @@ async function loadTopology() {
     }
 }
 
+// Wire up topology filter controls
+function initTopologyControls() {
+    const showInactive = document.getElementById('show-inactive');
+    const qualityFilter = document.getElementById('quality-filter');
+    const qualityValue = document.getElementById('quality-value');
+
+    if (showInactive) {
+        showInactive.addEventListener('change', () => {
+            if (topologyData) renderTopology();
+        });
+    }
+    if (qualityFilter) {
+        qualityFilter.addEventListener('input', (e) => {
+            if (qualityValue) qualityValue.textContent = e.target.value;
+            if (topologyData) renderTopology();
+        });
+    }
+}
+
 // Render Topology with D3.js
 function renderTopology() {
     const graphContainer = document.getElementById('topology-graph');
     const infoContainer = document.getElementById('topology-info');
-
-    console.log('renderTopology called', {
-        hasData: !!topologyData,
-        nodeCount: topologyData?.nodes?.length,
-        edgeCount: topologyData?.edges?.length
-    });
 
     if (!topologyData || !topologyData.nodes || topologyData.nodes.length === 0) {
         graphContainer.innerHTML = '<p class="info-message">No topology data available</p>';
         return;
     }
 
+    // Read filter state
+    const showInactive = document.getElementById('show-inactive');
+    const qualityFilter = document.getElementById('quality-filter');
+    const hideInactive = showInactive && !showInactive.checked;
+    const minQuality = qualityFilter ? parseInt(qualityFilter.value, 10) : 0;
+
     // Clear previous content
     graphContainer.innerHTML = '';
 
-    // Set up dimensions - ensure we have a valid width
+    // Set up dimensions from container
     const containerWidth = graphContainer.clientWidth || graphContainer.offsetWidth || 800;
     const width = containerWidth > 0 ? containerWidth : 800;
-    const height = 800; // Increased height for better visibility with larger layout
-
-    console.log('Container dimensions:', { width, height });
+    const height = graphContainer.clientHeight || 800;
 
     // Helper function to get node color based on hop count
     function getNodeColor(hops) {
@@ -805,6 +818,14 @@ function renderTopology() {
         if (hops === 1) return '#ffc107';   // Yellow - 1 hop
         if (hops < 99) return '#dc3545';    // Red - 2+ hops
         return '#6c757d';                    // Gray - unknown
+    }
+
+    // Classify edge by source hop for visual hierarchy
+    function getEdgeStyle(d) {
+        const srcHops = (typeof d.source === 'object') ? d.source.hops : nodeMap.get(d.source)?.hops;
+        if (srcHops === -1) return { width: 1.5, opacity: 0.6, color: '#764ba2' };   // from local
+        if (srcHops === 0)  return { width: 0.75, opacity: 0.4, color: '#28a745' };  // from direct
+        return { width: 0.75, opacity: 0.2, color: '#bbb' };                         // distant relay
     }
 
     try {
@@ -820,7 +841,6 @@ function renderTopology() {
                     container.attr('transform', event.transform);
                 }));
 
-        console.log('SVG created:', svg.node());
         topologySvg = svg;
 
         // Create container for zoom/pan
@@ -829,26 +849,23 @@ function renderTopology() {
         // Prepare data - create node lookup map
         const nodeMap = new Map();
         topologyData.nodes.forEach(node => {
+            // Filter: skip hops=99 nodes if "Show Inactive" unchecked
+            if (hideInactive && node.hops === 99) return;
             nodeMap.set(node.id, {
                 id: node.id,
-                label: node.short_name || node.label, // Use short_name for display
-                longName: node.long_name || node.label, // Keep long_name for tooltips
+                label: node.short_name || node.label,
+                longName: node.long_name || node.label,
                 hops: node.hops,
                 battery: node.battery
             });
         });
 
-        console.log('Processing nodes:', nodeMap.size);
-
-        // Create links with source/target objects - filter to only include valid nodes
+        // Create links - filter to valid nodes and quality threshold
         const links = topologyData.edges
             .filter(edge => {
-                const hasSource = nodeMap.has(edge.from);
-                const hasTarget = nodeMap.has(edge.to);
-                if (!hasSource || !hasTarget) {
-                    console.warn(`Skipping edge ${edge.from} -> ${edge.to}: source=${hasSource}, target=${hasTarget}`);
-                }
-                return hasSource && hasTarget;
+                if (!nodeMap.has(edge.from) || !nodeMap.has(edge.to)) return false;
+                if (minQuality > 0 && edge.quality !== undefined && edge.quality < minQuality) return false;
+                return true;
             })
             .map(edge => ({
                 source: edge.from,
@@ -857,12 +874,11 @@ function renderTopology() {
             }));
 
         const nodes = Array.from(nodeMap.values());
-        console.log('Nodes for simulation:', nodes.length, 'Links:', links.length, 'Filtered out:', topologyData.edges.length - links.length);
 
         // Set initial positions in radial layout based on hop count
         const centerX = width / 2;
         const centerY = height / 2;
-        const radiusStep = 180; // Distance between each hop ring - increased for less clutter
+        const radiusStep = 250;
 
         // Group nodes by their relay node for clustering
         const clusterMap = new Map();
@@ -882,12 +898,10 @@ function renderTopology() {
         nodes.forEach((node) => {
             const radius = (node.hops + 1) * radiusStep;
 
-            // If this node is a relay for others, position it and its cluster together
             if (clusterMap.has(node.id)) {
-                const clusterSize = clusterMap.get(node.id).length + 1; // +1 for relay node itself
-                const arcSize = (2 * Math.PI) / Math.max(nodes.length / 2, clusterSize * 1.5); // More spacing between clusters
+                const clusterSize = clusterMap.get(node.id).length + 1;
+                const arcSize = (2 * Math.PI) / Math.max(nodes.length / 2, clusterSize * 1.5);
 
-                // Position the relay node
                 if (!processedNodes.has(node.id)) {
                     const angle = angleOffset;
                     node.x = centerX + radius * Math.cos(angle);
@@ -895,7 +909,6 @@ function renderTopology() {
                     processedNodes.add(node.id);
                 }
 
-                // Position clustered nodes near their relay
                 const clustered = clusterMap.get(node.id);
                 clustered.forEach((nodeId, idx) => {
                     const targetNode = nodes.find(n => n.id === nodeId);
@@ -910,7 +923,6 @@ function renderTopology() {
 
                 angleOffset += arcSize * clusterSize;
             } else if (!processedNodes.has(node.id)) {
-                // Position unclustered nodes
                 const angle = angleOffset;
                 node.x = centerX + radius * Math.cos(angle);
                 node.y = centerY + radius * Math.sin(angle);
@@ -919,79 +931,65 @@ function renderTopology() {
             }
         });
 
-        // Create force simulation with radial constraint and clustering
+        // Create force simulation
         const simulation = d3.forceSimulation(nodes)
+            .alphaDecay(0.02)
+            .velocityDecay(0.3)
             .force('link', d3.forceLink(links)
                 .id(d => d.id)
                 .distance(d => {
-                    // Much shorter distance for relay links to keep clusters very tight
                     if (d.source.id !== 'LOCAL_NODE' && d.target.hops === d.source.hops + 1) {
-                        return 40; // Very tight clustering for relay connections
+                        return 60;
                     }
-                    // Longer distance for non-clustered links to spread nodes out
-                    return 180; // Increased distance for better separation
+                    return 220;
                 })
                 .strength(d => {
-                    // Very strong links for relay connections to pull clusters together
                     if (d.source.id !== 'LOCAL_NODE' && d.target.hops === d.source.hops + 1) {
-                        return 0.9; // Very strong clustering
+                        return 0.7;
                     }
-                    return 0.2; // Weaker strength for other links
+                    return 0.1;
                 }))
             .force('charge', d3.forceManyBody()
-                .strength(-400)) // Increased repulsion to push nodes apart
-            .force('collision', d3.forceCollide().radius(d => d.hops === -1 ? 70 : 60)) // Larger collision radius to prevent overlap
+                .strength(-150)
+                .distanceMax(500))
+            .force('collision', d3.forceCollide().radius(d => d.hops === -1 ? 45 : 30))
             .force('radial', d3.forceRadial(
                 d => (d.hops + 1) * radiusStep,
                 centerX,
                 centerY
-            ).strength(0.5)); // Reduced radial strength to allow more movement
+            ).strength(0.8));
 
         topologySimulation = simulation;
 
-        // Create arrow markers for links
-        svg.append('defs').selectAll('marker')
-            .data(['arrow'])
-            .enter()
-            .append('marker')
+        // Create arrow markers — small, light gray, 50% opacity
+        const defs = svg.append('defs');
+        defs.append('marker')
             .attr('id', 'arrow')
             .attr('viewBox', '0 -5 10 10')
-            .attr('refX', 30)
+            .attr('refX', 20)
             .attr('refY', 0)
-            .attr('markerWidth', 6)
-            .attr('markerHeight', 6)
+            .attr('markerWidth', 4)
+            .attr('markerHeight', 4)
             .attr('orient', 'auto')
             .append('path')
             .attr('d', 'M0,-5L10,0L0,5')
-            .attr('fill', '#667eea');
+            .attr('fill', '#bbb')
+            .attr('fill-opacity', 0.5);
 
-        // Create links
+        // Create curved edge paths with visual hierarchy
         const link = container.append('g')
             .attr('class', 'links')
-            .selectAll('line')
+            .selectAll('path')
             .data(links)
             .enter()
-            .append('line')
-            .attr('stroke', '#667eea')
-            .attr('stroke-width', 3)
-            .attr('marker-end', 'url(#arrow)')
-            .attr('stroke-opacity', 0.8);
+            .append('path')
+            .attr('fill', 'none')
+            .attr('stroke', d => getEdgeStyle(d).color)
+            .attr('stroke-width', d => getEdgeStyle(d).width)
+            .attr('stroke-opacity', d => getEdgeStyle(d).opacity)
+            .attr('marker-end', 'url(#arrow)');
 
-        console.log('Links created:', link.size());
-        console.log('Link data:', links);
-
-        // Debug: Check link coordinates after first tick
-        setTimeout(() => {
-            link.each(function(d) {
-                const x1 = d3.select(this).attr('x1');
-                const y1 = d3.select(this).attr('y1');
-                const x2 = d3.select(this).attr('x2');
-                const y2 = d3.select(this).attr('y2');
-                console.log('Link:', d.source.id, '->', d.target.id, `(${x1},${y1}) -> (${x2},${y2})`);
-            });
-        }, 1000);
-
-        // Drag functions (defined before use)
+        // Drag functions
         function dragStarted(event, d) {
             if (!event.active) simulation.alphaTarget(0.3).restart();
             d.fx = d.x;
@@ -1025,42 +1023,69 @@ function renderTopology() {
             })
             .style('cursor', 'pointer');
 
-        console.log('Nodes created:', node.size());
-
-        // Add circles to nodes (local node is larger)
+        // Add circles — smaller sizes
         node.append('circle')
-            .attr('r', d => d.hops === -1 ? 35 : 25)
+            .attr('r', d => d.hops === -1 ? 22 : 15)
             .attr('fill', d => getNodeColor(d.hops))
             .attr('stroke', d => d.hops === -1 ? '#764ba2' : '#667eea')
-            .attr('stroke-width', d => d.hops === -1 ? 4 : 3);
+            .attr('stroke-width', d => d.hops === -1 ? 3 : 1.5);
 
-        // Add labels to nodes (using short_name, no truncation needed)
+        // Add labels — smaller font
         node.append('text')
             .text(d => d.label)
             .attr('text-anchor', 'middle')
             .attr('dy', '.35em')
             .attr('fill', '#ffffff')
-            .attr('font-size', d => d.hops === -1 ? '11px' : '10px')
+            .attr('font-size', d => d.hops === -1 ? '9px' : '7px')
             .attr('font-weight', '600')
             .attr('pointer-events', 'none');
 
-        // Add tooltips (showing full long_name)
+        // Add tooltips
         node.append('title')
             .text(d => `${d.longName}\nHops: ${d.hops === 99 ? 'Unknown' : d.hops}\nBattery: ${d.battery || 'N/A'}%`);
 
+        // Compute curved path d attribute for each link
+        function arcPath(d) {
+            const dx = d.target.x - d.source.x;
+            const dy = d.target.y - d.source.y;
+            const dr = Math.sqrt(dx * dx + dy * dy) * 2; // large radius = slight curve
+            return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+        }
+
         // Update positions on each tick
         simulation.on('tick', () => {
-            link
-                .attr('x1', d => d.source.x)
-                .attr('y1', d => d.source.y)
-                .attr('x2', d => d.target.x)
-                .attr('y2', d => d.target.y);
-
-            node
-                .attr('transform', d => `translate(${d.x},${d.y})`);
+            link.attr('d', arcPath);
+            node.attr('transform', d => `translate(${d.x},${d.y})`);
         });
 
-        // Show info summary (exclude local node from counts)
+        // Auto zoom-to-fit after simulation settles
+        simulation.on('end', () => {
+            // Compute bounding box of all nodes
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            nodes.forEach(d => {
+                if (d.x < minX) minX = d.x;
+                if (d.y < minY) minY = d.y;
+                if (d.x > maxX) maxX = d.x;
+                if (d.y > maxY) maxY = d.y;
+            });
+            const pad = 40;
+            minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+            const bw = maxX - minX;
+            const bh = maxY - minY;
+            if (bw <= 0 || bh <= 0) return;
+            const scale = 0.85 * Math.min(width / bw, height / bh);
+            const tx = (width - scale * (minX + maxX)) / 2;
+            const ty = (height - scale * (minY + maxY)) / 2;
+            const transform = d3.zoomIdentity.translate(tx, ty).scale(scale);
+            svg.transition().duration(750).call(
+                d3.zoom().scaleExtent([0.1, 4]).on('zoom', (event) => {
+                    container.attr('transform', event.transform);
+                }).transform,
+                transform
+            );
+        });
+
+        // Show info summary
         const directNodes = topologyData.nodes.filter(n => n.hops === 0).length;
         const oneHopNodes = topologyData.nodes.filter(n => n.hops === 1).length;
         const multiHopNodes = topologyData.nodes.filter(n => n.hops > 1 && n.hops < 99).length;
@@ -1088,8 +1113,6 @@ function renderTopology() {
                 </div>
             </div>
         `;
-
-        console.log('Topology graph rendered successfully');
 
     } catch (error) {
         console.error('Error rendering topology:', error);
