@@ -43,17 +43,11 @@ import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 
-# Add federated-meshtastic collector to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../federated-meshtastic/collector'))
-
-try:
-    from outbox import OutboxManager
-except ImportError:
-    logging.error("Failed to import OutboxManager. Make sure federated-meshtastic/collector is available.")
-    OutboxManager = None
-
 from plugins import Base
 import plugins.liblogger as logger
+
+# OutboxManager is loaded lazily in __init__ only when the plugin is enabled
+OutboxManager = None
 
 
 class Plugin(Base):
@@ -81,11 +75,6 @@ class Plugin(Base):
         self.export_lookback_hours = 2
         self.export_interval = 3600
 
-        if OutboxManager is None:
-            logger.warn("OutboxManager not available. Real-time packet capture disabled.")
-            logger.info("Periodic database export will still work if export_enabled=true")
-            # Don't return - continue with initialization for export-only mode
-
         # Load config from cfg module
         import cfg
         config = cfg.config.get('federated_uploader', {})
@@ -95,6 +84,17 @@ class Plugin(Base):
         if not self.enabled:
             logger.info("Federated uploader plugin is disabled")
             return
+
+        # Only attempt to import OutboxManager when plugin is enabled
+        global OutboxManager
+        collector_path = os.path.join(os.path.dirname(__file__), '../../federated-meshtastic/collector')
+        sys.path.insert(0, collector_path)
+        try:
+            from outbox import OutboxManager as _OM
+            OutboxManager = _OM
+        except ImportError:
+            logger.warn("OutboxManager not available. Real-time packet capture disabled.")
+            logger.info("Periodic database export will still work if export_enabled=true")
 
         # Core configuration
         self.collector_id = config.get('collector_id', 'meshlink-collector')
