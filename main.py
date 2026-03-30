@@ -125,6 +125,13 @@ def onDisconnect(interface):
     for inst in plugin_instances:
         if hasattr(inst, "onDisconnect") and callable(inst.onDisconnect):
             inst.onDisconnect(interface,client)
+    # Close the old interface to release the serial port before reconnecting
+    try:
+        interface.close()
+    except Exception:
+        pass
+    logger.warn("Connection to node has been lost - attemping to reconnect")
+    time.sleep(5)
     init_radio()
 
 pub.subscribe(onConnection, "meshtastic.connection.established")
@@ -133,29 +140,36 @@ pub.subscribe(onReceive, "meshtastic.receive")
 
 def init_radio():
     global interface
-    logger.info("Connecting to node...")
-    if (cfg.config["use_serial"]):
-        interface = SerialInterface()
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info("Connecting to node...")
+            if (cfg.config["use_serial"]):
+                interface = SerialInterface()
+            else:
+                # Determine hostname and port with sensible defaults
+                host = cfg.config.get("radio_ip", "127.0.0.1")
+                port = 4403
 
-    else:
-#         interface = TCPInterface(hostname=cfg.config["radio_ip"], connectNow=True)
+                # Allow "host:port" in radio_ip if provided
+                if isinstance(host, str) and ":" in host:
+                    maybe_host, maybe_port = host.rsplit(":", 1)
+                    if maybe_port.isdigit():
+                        host = maybe_host
+                        try:
+                            port = int(maybe_port)
+                        except ValueError:
+                            port = 4403
 
-        # Determine hostname and port with sensible defaults
-        host = cfg.config.get("radio_ip", "127.0.0.1")
-        port = 4403
-
-        # Allow "host:port" in radio_ip if provided
-        if isinstance(host, str) and ":" in host:
-            maybe_host, maybe_port = host.rsplit(":", 1)
-            if maybe_port.isdigit():
-                host = maybe_host
-                try:
-                    port = int(maybe_port)
-                except ValueError:
-                    port = 4403
-
-        logger.info(f"Connecting via TCPInterface to {host}:{port}…")
-        interface = TCPInterface(hostname=host, portNumber=port, connectNow=True)
+                logger.info(f"Connecting via TCPInterface to {host}:{port}…")
+                interface = TCPInterface(hostname=host, portNumber=port, connectNow=True)
+            return  # Success
+        except Exception as e:
+            logger.warn(f"Failed to connect (attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                time.sleep(5)
+            else:
+                logger.warn(f"Could not connect after {max_retries} attempts, will retry on next disconnect event")
 
 
 init_radio()
