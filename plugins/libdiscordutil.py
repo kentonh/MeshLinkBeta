@@ -1,6 +1,54 @@
 import asyncio
+import re
+from datetime import datetime, timezone, timedelta
 import plugins.libmesh as LibMesh
+import plugins.liblogger as logger
 import discord
+
+def _normalize(text):
+    """Strip whitespace and role-ping lines for fuzzy matching."""
+    lines = text.splitlines()
+    lines = [l for l in lines if not re.match(r'^\s*@(here|everyone|\S+)\s*$', l.strip())]
+    return re.sub(r'\s+', ' ', '\n'.join(lines)).strip()
+
+async def _find_duplicate(channel, client, config, embed_description=None):
+    """Scan recent channel history for a matching message from another bot."""
+    dedup = config.get("dedup", {})
+    limit = dedup.get("history_limit", 10)
+    window = dedup.get("time_window_seconds", 60)
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=window)
+
+    try:
+        async for msg in channel.history(limit=limit):
+            if msg.created_at < cutoff:
+                break
+            if not msg.author.bot or msg.author == client.user:
+                continue
+            if embed_description and msg.embeds:
+                for emb in msg.embeds:
+                    if emb.description and _normalize(emb.description) == _normalize(embed_description):
+                        return msg
+    except Exception as e:
+        logger.warn(f"Dedup: failed to read channel history: {e}")
+    return None
+
+async def _react_to_duplicate(message, config):
+    """React to an existing duplicate message with the configured emoji."""
+    dedup = config.get("dedup", {})
+    emoji = dedup.get("reaction_emoji", "\U0001F4E1")
+    try:
+        await message.add_reaction(emoji)
+    except Exception as e:
+        logger.warn(f"Dedup: failed to add reaction: {e}")
+
+async def _dedup_send_embed(channel, embed, client, config):
+    """Check for duplicate, react if found, otherwise send the embed."""
+    dup = await _find_duplicate(channel, client, config, embed_description=embed.description)
+    if dup:
+        logger.info(f"Dedup: found duplicate in #{channel.name}, reacting instead of posting")
+        await _react_to_duplicate(dup, config)
+    else:
+        await channel.send(embed=embed)
 
 def genUserName(interface, packet, details=True):
     short = LibMesh.getUserShort(interface, packet)
@@ -50,8 +98,13 @@ def send_embed(title, description, client, config, channel_id=0, footer=None, co
                 channels.append(config["secondary_channel_message_ids"][channel_id-1])
             else:
                 channels = config["message_channel_ids"]
+            dedup_enabled = config.get("dedup", {}).get("enabled", False)
             for chan_id in channels:
-                asyncio.run_coroutine_threadsafe(client.get_channel(chan_id).send(embed=embed), client.loop)
+                channel = client.get_channel(chan_id)
+                if dedup_enabled:
+                    asyncio.run_coroutine_threadsafe(_dedup_send_embed(channel, embed, client, config), client.loop)
+                else:
+                    asyncio.run_coroutine_threadsafe(channel.send(embed=embed), client.loop)
 
 def send_info(message,client,config):
     if config["use_discord"]:

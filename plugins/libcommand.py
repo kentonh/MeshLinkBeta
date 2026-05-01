@@ -36,9 +36,9 @@ class simpleCommand():
                     args = parts[1] if len(parts) > 1 else ""
 
                     if command_name == self.name:
-                        # Check if command is from ignored channels (1-7)
+                        # Check if command is from ignored channels
                         send_channel = int(packet["channel"]) if "channel" in packet else 0
-                        ignored_channels = [1, 2, 3, 4, 5, 6, 7]
+                        ignored_channels = cfg.config.get("ignored_channel_indices", [1, 2, 3, 4, 5, 6, 7])
                         is_ignored_channel = send_channel in ignored_channels
 
                         if is_ignored_channel:

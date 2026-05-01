@@ -24,7 +24,7 @@ class basicEvents(plugins.Base):
         if "decoded" not in packet:
             # Check if encrypted message is from ignored channels
             encrypted_channel = int(packet["channel"]) if "channel" in packet else 0
-            ignored_channels = [1, 2, 3, 4, 5, 6, 7]
+            ignored_channels = cfg.config.get("ignored_channel_indices", [1, 2, 3, 4, 5, 6, 7])
 
             if encrypted_channel not in ignored_channels:
                 final_message += DiscordUtil.genUserName(interface, packet) + ": encrypted message"
@@ -52,8 +52,8 @@ class basicEvents(plugins.Base):
             else:
                 logger.infogreen("Unknown ID> " + text)
 
-            # Check if message is from ignored channels (1-7)
-            ignored_channels = [1, 2, 3, 4, 5, 6, 7]
+            # Check if message is from ignored channels
+            ignored_channels = cfg.config.get("ignored_channel_indices", [1, 2, 3, 4, 5, 6, 7])
             is_ignored_channel = send_channel in ignored_channels
 
             if text.lower() == "meshlink" and not is_ignored_channel:

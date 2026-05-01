@@ -23,6 +23,15 @@ message_role: "@here" # the role on discord to ping on messages, if you dont wan
 permit_broadcast_of_discord_messages: True # allow messages from discord to be transmitted to your selected channel
 send_mesh_commands_to_discord: True # send responses to mesh commands to discord
 
+### DEDUP (OPTIONAL - prevents duplicate messages when multiple bots share a channel)
+# When enabled, before posting a message embed, the bot checks recent channel history
+# for an identical message from another bot. If found, it reacts with an emoji instead.
+# dedup:
+#   enabled: false
+#   history_limit: 10              # Number of recent messages to check
+#   time_window_seconds: 60        # Only match messages within this time window
+#   reaction_emoji: "\U0001F4E1"   # Emoji to react with (default: satellite antenna)
+
 ### RESPONSE DELAY (OPTIONAL - defaults work out-of-box)
 # Prevents packet collisions when multiple MeshLinkBeta nodes respond to commands
 # Uses combined delay: (hops * hop_delay) + (node_slot * slot_duration) + jitter
@@ -38,6 +47,7 @@ prefix: "$" # mesh command prefix
 use_serial: True # set to False if using tcp
 radio_ip: "192.168.1.100" # ip of the radio if using tcp
 send_channel_index: 0 # the index of the channel to send messages on
+ignored_channel_indices: [1, 2, 3, 4, 5, 6, 7] # mesh channels to ignore (not forwarded to Discord, commands not processed)
 verbose_packets: False # should the full packet data be shown in the console
 send_start_stop: True # should the meshlink announcement be sent on connection and shut down
 include_username_prefix: True # include the username prefix in mesh messages from discord

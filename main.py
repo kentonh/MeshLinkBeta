@@ -54,12 +54,14 @@ config_options = [
     "use_serial",
     "radio_ip",
     "send_channel_index",
+    "ignored_channel_indices",
     "verbose_packets",
     "send_start_stop",
     "include_username_prefix",
     "weather_lat",
     "weather_long",
-    "max_weather_hours"
+    "max_weather_hours",
+    "dedup"
 ]
 
 for i in config_options:

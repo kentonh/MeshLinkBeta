@@ -7,7 +7,7 @@
 
 # Configuration - adjust these paths as needed
 MESHLINK_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$MESHLINK_DIR/venv"
+VENV_DIR="$MESHLINK_DIR/.venv"
 MAIN_SCRIPT="$MESHLINK_DIR/main.py"
 LOG_FILE="$MESHLINK_DIR/meshlink_cron.log"
 PID_FILE="$MESHLINK_DIR/meshlink.pid"
