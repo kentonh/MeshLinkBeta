@@ -85,7 +85,7 @@ class basicEvents(plugins.Base):
 
         # Check if packet is from ignored channels before sending to Discord
         packet_channel = int(packet["channel"]) if "channel" in packet else 0
-        ignored_channels = [1, 2, 3, 4, 5, 6, 7]
+        ignored_channels = cfg.config.get("ignored_channel_indices", [1, 2, 3, 4, 5, 6, 7])
         if packet_channel not in ignored_channels:
             DiscordUtil.send_info(final_message, client, cfg.config)
         else:
