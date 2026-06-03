@@ -65,7 +65,8 @@ class NodeDatabase:
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     is_ignored BOOLEAN DEFAULT 0,
-                    is_airplane BOOLEAN DEFAULT 0
+                    is_airplane BOOLEAN DEFAULT 0,
+                    is_local BOOLEAN DEFAULT 0
                 )
             """)
             
@@ -204,6 +205,9 @@ class NodeDatabase:
             if 'last_name_update_utc' not in columns:
                 cursor.execute("ALTER TABLE nodes ADD COLUMN last_name_update_utc TEXT")
                 logger.info("Added last_name_update_utc column to nodes table")
+            if 'is_local' not in columns:
+                cursor.execute("ALTER TABLE nodes ADD COLUMN is_local BOOLEAN DEFAULT 0")
+                logger.info("Added is_local column to nodes table")
 
             # Migration: Add message_text column to packet_history if it doesn't exist
             cursor.execute("PRAGMA table_info(packet_history)")
@@ -328,7 +332,28 @@ class NodeDatabase:
         except Exception as e:
             logger.warn(f"Failed to upsert node {node_id}: {e}")
             return False
-    
+
+    def set_local_node(self, node_id: str) -> bool:
+        """Mark a single node as the local collector and clear the flag on any others.
+
+        Called on every connect so that swapping the locally-connected radio
+        updates is_local without leaving the previous radio still marked.
+        """
+        try:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+            # CASE expression keeps this to one statement so concurrent readers
+            # never see two rows with is_local=1.
+            cursor.execute(
+                "UPDATE nodes SET is_local = CASE WHEN node_id = ? THEN 1 ELSE 0 END",
+                (node_id,),
+            )
+            conn.commit()
+            return True
+        except Exception as e:
+            logger.warn(f"Failed to set local node {node_id}: {e}")
+            return False
+
     def insert_packet(self, packet_data: Dict[str, Any], max_packets_per_node: int = 1000) -> bool:
         """Insert packet history and cleanup old packets if needed"""
         try:

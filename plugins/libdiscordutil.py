@@ -32,21 +32,52 @@ async def _find_duplicate(channel, client, config, embed_description=None):
         logger.warn(f"Dedup: failed to read channel history: {e}")
     return None
 
-async def _react_to_duplicate(message, config):
-    """React to an existing duplicate message with the configured emoji."""
-    dedup = config.get("dedup", {})
-    emoji = dedup.get("reaction_emoji", "\U0001F4E1")
+_HOP_DIGIT_EMOJI = [
+    "0️⃣", "1️⃣", "2️⃣", "3️⃣",
+    "4️⃣", "5️⃣", "6️⃣", "7️⃣",
+    "8️⃣", "9️⃣",
+]
+_HOP_TEN_EMOJI = "\U0001f51a"   # 🔟
+_HOP_MANY_EMOJI = "\U0001f522"  # 🔢
+
+def hop_reaction_emoji(packet):
+    """Return a keycap-digit emoji representing hops-away, or None if unknown.
+
+    Callers pass the resulting string to send_embed as reaction_emoji so that
+    the dedup reaction shows how many hops away this collector heard the
+    message — small but useful coverage signal when several collectors share
+    a Discord channel.
+    """
+    hop_start = packet.get('hopStart')
+    hop_limit = packet.get('hopLimit')
+    if hop_start is None or hop_limit is None:
+        return None
+    hops = hop_start - hop_limit
+    if 0 <= hops <= 9:
+        return _HOP_DIGIT_EMOJI[hops]
+    if hops == 10:
+        return _HOP_TEN_EMOJI
+    return _HOP_MANY_EMOJI
+
+async def _react_to_duplicate(message, config, reaction_emoji=None):
+    """React to an existing duplicate message.
+
+    Uses reaction_emoji when provided, otherwise the configured default.
+    """
+    if reaction_emoji is None:
+        dedup = config.get("dedup", {})
+        reaction_emoji = dedup.get("reaction_emoji", "\U0001F4E1")
     try:
-        await message.add_reaction(emoji)
+        await message.add_reaction(reaction_emoji)
     except Exception as e:
         logger.warn(f"Dedup: failed to add reaction: {e}")
 
-async def _dedup_send_embed(channel, embed, client, config):
+async def _dedup_send_embed(channel, embed, client, config, reaction_emoji=None):
     """Check for duplicate, react if found, otherwise send the embed."""
     dup = await _find_duplicate(channel, client, config, embed_description=embed.description)
     if dup:
         logger.info(f"Dedup: found duplicate in #{channel.name}, reacting instead of posting")
-        await _react_to_duplicate(dup, config)
+        await _react_to_duplicate(dup, config, reaction_emoji=reaction_emoji)
     else:
         await channel.send(embed=embed)
 
@@ -87,7 +118,7 @@ def send_msg(message,client,config,channel_id=0):
                 for i in config["message_channel_ids"]:
                     asyncio.run_coroutine_threadsafe(client.get_channel(i).send(message),client.loop)
 
-def send_embed(title, description, client, config, channel_id=0, footer=None, color=0x3c90ba):
+def send_embed(title, description, client, config, channel_id=0, footer=None, color=0x3c90ba, reaction_emoji=None):
     if config["use_discord"]:
         if (client.is_ready()):
             embed = discord.Embed(title=title, description=description, color=color)
@@ -102,7 +133,7 @@ def send_embed(title, description, client, config, channel_id=0, footer=None, co
             for chan_id in channels:
                 channel = client.get_channel(chan_id)
                 if dedup_enabled:
-                    asyncio.run_coroutine_threadsafe(_dedup_send_embed(channel, embed, client, config), client.loop)
+                    asyncio.run_coroutine_threadsafe(_dedup_send_embed(channel, embed, client, config, reaction_emoji=reaction_emoji), client.loop)
                 else:
                     asyncio.run_coroutine_threadsafe(channel.send(embed=embed), client.loop)
 

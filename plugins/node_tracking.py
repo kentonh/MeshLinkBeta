@@ -979,6 +979,12 @@ class NodeTracking(plugins.Base):
 
         logger.info("Node tracking ready - will capture all packets")
 
+        # Seed the locally-connected radio into nodes.db. Without this the local
+        # node never gets a row (it doesn't receive its own packets), so maps
+        # and downstream exports have no record of "this collector's node".
+        # Also flips is_local off on any previously-connected radio.
+        self._register_local_node(interface)
+
         # Start auto-traceroute if enabled
         auto_tr_config = NodeTracking._config.get('auto_traceroute', {})
         if auto_tr_config.get('enabled', False):
@@ -992,6 +998,52 @@ class NodeTracking(plugins.Base):
         # Do initial export
         self._export_data()
     
+    def _register_local_node(self, interface):
+        """Upsert the locally-connected radio into nodes.db and mark it is_local."""
+        try:
+            my_info = interface.getMyNodeInfo() or {}
+            user = my_info.get('user') or {}
+            local_node_id = user.get('id')
+            if not local_node_id:
+                logger.warn("Local node has no id yet; skipping local-node seed")
+                return
+
+            node_data = {
+                'node_id': local_node_id,
+                'node_num': my_info.get('num'),
+                'short_name': user.get('shortName'),
+                'long_name': user.get('longName'),
+                'hardware_model': user.get('hwModel'),
+                'is_mqtt': False,
+            }
+
+            # interface.nodes carries position/telemetry the bare myNodeInfo lacks.
+            full = None
+            if hasattr(interface, 'nodes') and interface.nodes:
+                full = interface.nodes.get(local_node_id)
+            if full:
+                pos = full.get('position') or {}
+                if pos.get('latitude') is not None:
+                    node_data['latitude'] = pos.get('latitude')
+                if pos.get('longitude') is not None:
+                    node_data['longitude'] = pos.get('longitude')
+                if pos.get('altitude') is not None:
+                    node_data['altitude'] = pos.get('altitude')
+
+                metrics = full.get('deviceMetrics') or {}
+                if metrics.get('batteryLevel') is not None:
+                    node_data['battery_level'] = metrics.get('batteryLevel')
+                if metrics.get('voltage') is not None:
+                    node_data['voltage'] = metrics.get('voltage')
+
+            NodeTracking._db.upsert_node(node_data)
+            NodeTracking._db.set_local_node(local_node_id)
+            logger.infogreen(
+                f"Registered local node: {local_node_id} ({node_data.get('long_name') or node_data.get('short_name') or 'Unknown'})"
+            )
+        except Exception as e:
+            logger.warn(f"Failed to register local node: {e}")
+
     def onDisconnect(self, interface, client):
         """Handle disconnection from node"""
         if not NodeTracking._config or not NodeTracking._config.get('enabled', True):

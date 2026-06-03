@@ -67,7 +67,8 @@ class basicEvents(plugins.Base):
                 if cfg.config["ping_on_messages"]:
                     description += f"\n\n{cfg.config['message_role']}"
 
-                DiscordUtil.send_embed(title, description, client, cfg.config, send_channel)
+                DiscordUtil.send_embed(title, description, client, cfg.config, send_channel,
+                                       reaction_emoji=DiscordUtil.hop_reaction_emoji(packet))
             else:
                 logger.info(f"Skipping Discord message for channel {send_channel} (ignored)")
             return
