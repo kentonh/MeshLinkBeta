@@ -19,6 +19,7 @@ import signal
 import plugins.libdiscordutil as DiscordUtil
 from datetime import datetime
 import math
+import threading
 import plugins.libcommand as LibCommand
 import plugins.libinterface as libinterface
 
@@ -126,14 +127,27 @@ def onDisconnect(interface):
     for inst in plugin_instances:
         if hasattr(inst, "onDisconnect") and callable(inst.onDisconnect):
             inst.onDisconnect(interface,client)
-    # Close the old interface to release the serial port before reconnecting
-    try:
-        interface.close()
-    except Exception:
-        pass
-    logger.warn("Connection to node has been lost - attemping to reconnect")
-    time.sleep(5)
-    init_radio()
+
+    # The "connection.lost" pubsub event is published from the meshtastic
+    # reader thread. Closing the interface here would call thread.join() on
+    # the very thread we're running on (self-join deadlock), and creating a
+    # new interface synchronously would block the old reader from unwinding.
+    # Hand the close + reconnect off to a dedicated worker thread.
+    def _close_and_reconnect(old_interface):
+        try:
+            old_interface.close()
+        except Exception as e:
+            logger.warn(f"Error closing old interface during reconnect: {e}")
+        logger.warn("Connection to node has been lost - attemping to reconnect")
+        time.sleep(5)
+        init_radio()
+
+    threading.Thread(
+        target=_close_and_reconnect,
+        args=(interface,),
+        name="ReconnectThread",
+        daemon=True,
+    ).start()
 
 pub.subscribe(onConnection, "meshtastic.connection.established")
 pub.subscribe(onDisconnect, "meshtastic.connection.lost")
